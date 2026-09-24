@@ -1,0 +1,78 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// DYNAMOS Policy Enforcer — Layer 2 (shared): Agreement Rules
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Loaded after 01_interface_policy.eflint.  Contains:
+//
+//   (i)   Intermediate fact declarations (agreement + relation structure)
+//   (ii)  Extend rules that make the Layer-1 query facts derivable
+//
+// At runtime the Request Context Builder and PIP populate domain instances,
+// agreement data, and request context.  For testing, each scenario file
+// bundles everything needed after Layer 1 + Layer 2.
+//
+// Load order:  01_interface_policy  →  02_agreement_rules  →  scenario_*
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// (i)  Intermediate facts — agreement structure
+// ═══════════════════════════════════════════════════════════════════════════
+
+Fact agreement Identified by data-steward
+
+Fact steward-supports-archetype Identified by data-steward * archetype
+  Conditioned by agreement(data-steward)
+
+Fact steward-supports-compute-provider Identified by data-steward * compute-provider
+  Conditioned by agreement(data-steward)
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// (i)  Intermediate facts — relation structure
+// ═══════════════════════════════════════════════════════════════════════════
+
+Fact has-relation Identified by requester * data-steward
+  Conditioned by agreement(data-steward)
+
+Fact relation-allows-request-type Identified by requester * data-steward * request-type
+  Conditioned by has-relation(requester, data-steward)
+
+Fact relation-allows-dataset Identified by requester * data-steward * dataset
+  Conditioned by has-relation(requester, data-steward)
+
+Fact relation-allows-archetype Identified by requester * data-steward * archetype
+  Conditioned by has-relation(requester, data-steward)
+
+Fact relation-allows-compute-provider Identified by requester * data-steward * compute-provider
+  Conditioned by has-relation(requester, data-steward)
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// (ii)  Derivation rules for Layer-1 query facts
+// ═══════════════════════════════════════════════════════════════════════════
+
+Extend Fact permitted-at-steward
+  Holds when agreement(data-steward)
+    && has-relation(requester, data-steward)
+
+Extend Fact permitted-request
+  Holds when requested-steward(data-steward)
+    && permitted-at-steward(requester, data-steward)
+
+Extend Fact valid-archetype
+  Holds when relation-allows-archetype(requester, data-steward, archetype)
+    && steward-supports-archetype(data-steward, archetype)
+
+Extend Fact valid-compute-provider
+  Holds when relation-allows-compute-provider(requester, data-steward, compute-provider)
+    && steward-supports-compute-provider(data-steward, compute-provider)
+
+// Compute-provider validation is only relevant for DataThroughTtp,
+// where data is routed through a third party.  For ComputeToData the
+// computation travels to the data steward's own infrastructure, so no
+// external compute provider is involved.  The runtime checks
+// valid-compute-provider separately when the archetype requires it.
+Extend Fact permitted-continuation
+  Holds when permitted-at-steward(requester, data-steward)
+    && valid-archetype(requester, data-steward, archetype)

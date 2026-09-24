@@ -75,9 +75,11 @@ func GetKeysFromPrefix(etcdClient *clientv3.Client, key string, opts ...Option) 
 		}
 
 		if len(resp.Kvs) == 0 {
-			// If key not found, return an error to trigger a retry
+			if retryOpts.StopOnMissing {
+				return bo.Permanent(&ErrKeyNotFound{Key: key})
+			}
+			// If key not found, return an error to trigger a retry.
 			return &ErrKeyNotFound{Key: key}
-			// return fmt.Errorf("key %s not found in etcd", key)
 		}
 
 		for _, ev := range resp.Kvs {
@@ -134,9 +136,11 @@ func GetValueFromEtcd(etcdClient *clientv3.Client, key string, opts ...Option) (
 		}
 
 		if len(resp.Kvs) == 0 {
-			// If key not found, return an error to trigger a retry
-			return &ErrKeyNotFound{Key: key}
-			// return fmt.Errorf("key %s not found in etcd", key)
+			notFound := &ErrKeyNotFound{Key: key}
+			if retryOpts.StopOnMissing {
+				return bo.Permanent(notFound)
+			}
+			return notFound
 		}
 
 		value = string(resp.Kvs[0].Value)

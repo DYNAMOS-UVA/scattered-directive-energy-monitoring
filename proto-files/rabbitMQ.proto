@@ -123,6 +123,9 @@ message PolicyUpdate {
   repeated string data_providers = 3;
   RequestMetadata request_metadata = 4;
   ValidationResponse validation_response = 5;
+  bytes agreement_payload = 6;
+  string agreement_name = 7;
+  string format = 8; // "json" | "eflint"; empty for sharedRulesUpdate
 }
 
 message CompositionRequest {

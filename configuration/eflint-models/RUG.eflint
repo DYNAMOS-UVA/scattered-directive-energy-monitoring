@@ -1,0 +1,24 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// DYNAMOS Policy Enforcer — Agreement: RUG
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Layer 2b — Per-steward agreement for RUG.
+// Stored in etcd at /policyEnforcer/eflintModels/RUG.
+//
+// RUG has an agreement registered but no relations: any request will be
+// denied at this steward because permitted-at-steward requires
+// has-relation(requester, data-steward) to hold.
+//
+// Requires (loaded by the policy enforcer in this order):
+//   1. 01_interface_policy.eflint  (embedded with the enforcer binary)
+//   2. 02_agreement_rules.eflint   (etcd /policyEnforcer/eflintRules/shared)
+//   3. this file                   (etcd /policyEnforcer/eflintModels/RUG)
+//   4. Layer-3 request facts       (generated per request)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Type instances referenced by this agreement.
++data-steward("RUG").
+
++agreement("RUG").
+
+// No archetypes, compute providers, or relations registered for RUG.

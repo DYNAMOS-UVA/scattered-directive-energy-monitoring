@@ -74,6 +74,24 @@ type Agreement struct {
 	Archetypes       []string            `json:"archetypes"`
 }
 
+const (
+	ValidationStrategyLegacy = "legacy"
+	ValidationStrategyEflint = "eflint"
+)
+
+type ProviderValidationConfig struct {
+	Name               string `json:"name"`
+	ValidationStrategy string `json:"validationStrategy"`
+	AgreementLocation  string `json:"agreementLocation"`
+}
+
+type EflintSavedState struct {
+	ID            string          `json:"id"`
+	ModelLocation string          `json:"model_location"`
+	Graph         json.RawMessage `json:"graph"`
+	SavedAt       time.Time       `json:"saved_at"`
+}
+
 type RequestType struct {
 	Name             string            `json:"name"`
 	RequiredServices []string          `json:"requiredServices"`
@@ -120,6 +138,14 @@ func (a MicroserviceMetadata) GetName() string {
 
 func (a Agreement) GetName() string {
 	return a.Name
+}
+
+func (p ProviderValidationConfig) GetName() string {
+	return p.Name
+}
+
+func (e EflintSavedState) GetName() string {
+	return e.ID
 }
 
 func GenericGetHandler[T any](w http.ResponseWriter, req *http.Request, etcdClient *clientv3.Client, etcdRoot string) {

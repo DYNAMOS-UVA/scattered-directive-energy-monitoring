@@ -1,0 +1,96 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// DYNAMOS Policy Enforcer — Layer 1: Interface Policy
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Stable schema shared between the enforcer codebase and every agreement
+// policy (Layer 2).  Declares base types, query facts, the request
+// lifecycle (Act + Duty), and their arities.  No derivation rules.
+// The agreement policy supplies Holds-when clauses via Extend Fact.
+//
+// Changes to this file require a codebase release.  The agreement policy can
+// be replaced at runtime without touching this layer.
+//
+// Request-approval input
+// ──────────────────────
+// The only inputs from a RequestApproval message are:
+//   • the requester (user)
+//   • an array of data stewards (requested-steward instances)
+//
+// The policy enforcer fetches each steward's agreement from etcd, checks
+// whether the requester has a relation, and discovers the valid archetypes
+// and compute providers per steward.  At least one steward must have a
+// valid relation for the request to be admissible.
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Base fact types
+// ═══════════════════════════════════════════════════════════════════════════
+
+Fact requester
+Fact data-steward
+Fact dataset
+Fact request-type
+Fact archetype
+Fact compute-provider
+
+// Marks a data steward as being addressed by the current RequestApproval.
+// Populated per request by the Request Context Builder.
+Fact requested-steward Identified by data-steward
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Query facts — invoked by the DYNAMOS runtime
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Overall request admissibility: at least one requested steward must have
+// a valid relation with the requester.
+Fact permitted-request
+  Identified by requester
+
+// Per-steward admissibility: the requester has standing at this steward.
+Fact permitted-at-steward
+  Identified by requester * data-steward
+
+// Generative queries: enumerate the archetypes and compute providers that
+// are valid for a (requester, steward) pair — used by the orchestrator to
+// compose the microservice chain.
+Fact valid-archetype
+  Identified by requester * data-steward * archetype
+
+Fact valid-compute-provider
+  Identified by requester * data-steward * compute-provider
+
+// Ongoing decision: evaluated during continuous authorisation for an
+// in-flight session that uses a specific archetype at a steward.
+// A compute-provider check (valid-compute-provider) is only required
+// when the archetype is dataThroughTtp; the runtime handles that separately.
+Fact permitted-continuation
+  Identified by requester * data-steward * archetype
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Request lifecycle
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Audit obligation: the data steward must log the processing of a
+// requester's data.  Active enforcement is deferred to a future
+// Obligation Manager (design decision D5).
+Duty obligated-log
+  Holder   data-steward
+  Claimant requester
+
+// Records that a data request has been accepted for a (requester, steward)
+// pair.  Created as an effect of submit-data-request.
+Fact data-request
+  Identified by requester * data-steward
+
+// The act that transitions a request into an accepted data-request.
+// Its enablement conditions reference Layer-1 query facts whose derivation
+// rules are supplied by the agreement policy (Layer 2) via Extend Fact.
+Act submit-data-request
+  Actor requester
+  Related to data-steward
+  Holds when requested-steward(data-steward)
+    && permitted-at-steward(requester, data-steward)
+  Creates data-request(requester, data-steward)
+  Creates obligated-log(data-steward, requester)

@@ -1,0 +1,34 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// DYNAMOS Policy Enforcer — Agreement: VU
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Layer 2b — Per-steward agreement for VU.
+// Stored in etcd at /policyEnforcer/eflintModels/VU.
+//
+// Requires (loaded by the policy enforcer in this order):
+//   1. 01_interface_policy.eflint  (embedded with the enforcer binary)
+//   2. 02_agreement_rules.eflint   (etcd /policyEnforcer/eflintRules/shared)
+//   3. this file                   (etcd /policyEnforcer/eflintModels/VU)
+//   4. Layer-3 request facts       (generated per request)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Type instances referenced by this agreement.
++data-steward("VU").
++archetype("computeToData").
++archetype("dataThroughTtp").
++compute-provider("SURF").
++dataset("wageGap").
++request-type("sqlDataRequest").
++request-type("genericRequest").
+
++agreement("VU").
+
+// Archetypes supported at the agreement level.
++steward-supports-archetype("VU", "computeToData").
++steward-supports-archetype("VU", "dataThroughTtp").
+
+// Compute providers accepted by VU.
++steward-supports-compute-provider("VU", "SURF").
+
+// ── Relation: Jorrit ────────────────────────────
+

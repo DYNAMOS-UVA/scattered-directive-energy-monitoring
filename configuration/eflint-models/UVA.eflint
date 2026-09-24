@@ -1,0 +1,42 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// DYNAMOS Policy Enforcer — Agreement: UVA
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Layer 2b — Per-steward agreement for UVA.
+// Stored in etcd at /policyEnforcer/eflintModels/UVA.
+//
+// Requires (loaded by the policy enforcer in this order):
+//   1. 01_interface_policy.eflint  (embedded with the enforcer binary)
+//   2. 02_agreement_rules.eflint   (etcd /policyEnforcer/eflintRules/shared)
+//   3. this file                   (etcd /policyEnforcer/eflintModels/UVA)
+//   4. Layer-3 request facts       (generated per request)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Type instances referenced by this agreement.
++data-steward("UVA").
++archetype("computeToData").
++archetype("dataThroughTtp").
++archetype("reproducableScience").
++compute-provider("SURF").
++dataset("wageGap").
++request-type("sqlDataRequest").
++request-type("genericRequest").
+
++agreement("UVA").
+
+// Archetypes supported at the agreement level.
++steward-supports-archetype("UVA", "computeToData").
++steward-supports-archetype("UVA", "dataThroughTtp").
++steward-supports-archetype("UVA", "reproducableScience").
+
+// Compute providers accepted by UVA.
++steward-supports-compute-provider("UVA", "SURF").
+
+// ── Relation: Jorrit ────────────────────────────
++has-relation("Jorrit", "UVA").
++relation-allows-request-type("Jorrit", "UVA", "sqlDataRequest").
++relation-allows-request-type("Jorrit", "UVA", "genericRequest").
++relation-allows-dataset("Jorrit", "UVA", "wageGap").
++relation-allows-archetype("Jorrit", "UVA", "computeToData").
++relation-allows-archetype("Jorrit", "UVA", "dataThroughTtp").
++relation-allows-compute-provider("Jorrit", "UVA", "SURF").

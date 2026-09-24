@@ -25,13 +25,13 @@
 #         - containerPort: 8080
 #         env:
 #         - name: SIDECAR_REPOSITORY_NAME
-#           value: apipilikas
+#           value: {{ .Values.dockerArtifactAccount }}
 #         - name: DYNAMOS_ENVIRONMENT
 #           value: local
 #         - name: DATA_STEWARD_NAME
 #           value: %WORKER%
 #         - name: MICROSERVICE_REPOSITORY_NAME
-#           value: apipilikas
+#           value: {{ .Values.dockerArtifactAccount }}
 #         - name: OC_AGENT_HOST
 #           value: {{ .Values.tracingEndpoint }}
 #       - name: sidecar

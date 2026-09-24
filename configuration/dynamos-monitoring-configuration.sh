@@ -16,6 +16,8 @@ fi
 # Paths
 monitoring_chart="${CHARTS_PATH}/monitoring"
 
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+
 echo -e "Installing Prometheus stack...\n"
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update

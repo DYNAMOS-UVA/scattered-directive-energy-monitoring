@@ -30,9 +30,6 @@ metadata:
   annotations:
     "linkerd.io/inject": "disabled"
 spec:
-  nodeSelector:
-    kubernetes.io/hostname: dynamos
-  nodeName: dynamos
   containers:
   - name: temp-container
     image: busybox

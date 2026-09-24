@@ -21,6 +21,9 @@ func RegisterRoutes(
 	pool *eflint.InstancePool,
 ) {
 	apiMux.Handle("/health", http.HandlerFunc(healthHandler))
+	apiMux.Handle("/readyz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		readinessHandler(w, r, pool)
+	}))
 
 	registerPolicyEnforcerRoutes(apiMux, policyEnforcerHandler)
 
@@ -111,4 +114,31 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "healthy"})
+}
+
+// readinessHandler reports ready only when every configured eFLINT pool instance is running.
+func readinessHandler(w http.ResponseWriter, r *http.Request, pool *eflint.InstancePool) {
+	if r.Method != http.MethodGet {
+		httpapi.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	target := pool.GetTargetSize()
+	healthy := 0
+	for _, instance := range pool.ListInstances() {
+		if instance.Running && instance.Status != eflint.InstanceStateUnhealthy {
+			healthy++
+		}
+	}
+
+	if healthy < target {
+		httpapi.WriteError(w, http.StatusServiceUnavailable, "eflint pool is not ready")
+		return
+	}
+
+	httpapi.WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "ready",
+		"healthyInstances": healthy,
+		"targetInstances":  target,
+	})
 }

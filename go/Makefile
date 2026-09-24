@@ -20,10 +20,6 @@ $(dynamos_core): prepare proto
 	docker build --platform linux/amd64 --build-arg NAME='$@' -t $(dockerhub_account)/$@:$(branch_name) -t $(dockerhub_account)/$@:latest ./cmd/$@/)
 	docker push $(dockerhub_account)/$@:$(branch_name)
 	docker push $(dockerhub_account)/$@:latest
-endef
-
-$(dynamos): prepare proto
-	$(build_and_push_image)
 
 policy-enforcer: prepare proto
 	docker buildx build --platform $(platform) --load --build-arg NAME='policy-enforcer' --build-arg EFLINT_REPO='$(eflint_repo)' --build-arg EFLINT_TAG='$(eflint_tag)' -t $(dockerhub_account)/policy-enforcer:$(branch_name) -t $(dockerhub_account)/policy-enforcer:latest -f ./cmd/policy-enforcer/Dockerfile .

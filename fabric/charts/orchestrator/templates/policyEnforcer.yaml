@@ -24,6 +24,24 @@ spec:
         env:
         - name: OC_AGENT_HOST
           value: {{ .Values.tracingEndpoint }}
+        - name: LANG
+          value: C.UTF-8
+        - name: LC_ALL
+          value: C.UTF-8
+        readinessProbe:
+          httpGet:
+            path: /api/v1/readyz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+        volumeMounts:
+        - name: eflint-states
+          mountPath: /app/eflint-states
+        - name: eflint-models
+          mountPath: /app/eflint-models
+          subPath: eflint-models
         # resources:
         #   requests:
         #     memory: "128Mi"
@@ -43,3 +61,9 @@ spec:
           value: normal_user
         - name: OC_AGENT_HOST
           value: {{ .Values.tracingEndpoint }}
+      volumes:
+      - name: eflint-states
+        emptyDir: {}
+      - name: eflint-models
+        persistentVolumeClaim:
+          claimName: etcd-pvc

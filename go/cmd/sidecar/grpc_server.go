@@ -142,6 +142,16 @@ func (s *serverInstance) Consume(in *pb.ConsumeRequest, stream pb.RabbitMQ_Consu
 				logger.Sugar().Errorf("Error handling policyUpdate: %v", err)
 				return status.Error(codes.Internal, err.Error())
 			}
+		case "agreementUpdate":
+			if err := s.handleAgreementUpdate(msg, stream); err != nil {
+				logger.Sugar().Errorf("Error handling agreementUpdate: %v", err)
+				return status.Error(codes.Internal, err.Error())
+			}
+		case "sharedRulesUpdate":
+			if err := s.handleSharedRulesUpdate(msg, stream); err != nil {
+				logger.Sugar().Errorf("Error handling sharedRulesUpdate: %v", err)
+				return status.Error(codes.Internal, err.Error())
+			}
 		case "requestApprovalResponse":
 			if err := s.handleRequestApprovalToApiResponse(msg, stream); err != nil {
 				logger.Sugar().Errorf("Error handling requestApprovalResponse: %v", err)

@@ -18,13 +18,15 @@ import (
 )
 
 var (
-	logger                             = lib.InitLogger(logLevel)
-	etcdClient        *clientv3.Client = etcd.GetEtcdClient(etcdEndpoints)
-	conn              *grpc.ClientConn
-	receiveMutex      = &sync.Mutex{}
-	policyUpdateMutex = &sync.Mutex{}
-	policyUpdateMap   = make(map[string]map[string]*pb.CompositionRequest)
-	c                 pb.RabbitMQClient
+	logger                                = lib.InitLogger(logLevel)
+	etcdClient           *clientv3.Client = etcd.GetEtcdClient(etcdEndpoints)
+	conn                 *grpc.ClientConn
+	receiveMutex         = &sync.Mutex{}
+	policyUpdateMutex    = &sync.Mutex{}
+	policyUpdateMap      = make(map[string]map[string]*pb.CompositionRequest)
+	agreementUpdateMutex = &sync.Mutex{}
+	agreementUpdateMap   = make(map[string]chan *pb.PolicyUpdate)
+	c                    pb.RabbitMQClient
 )
 
 type validation struct {

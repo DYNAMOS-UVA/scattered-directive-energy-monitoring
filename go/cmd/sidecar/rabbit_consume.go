@@ -113,6 +113,18 @@ func (s *serverInstance) handlePolicyUpdate(msg amqp.Delivery, stream pb.RabbitM
 	return s.handleResponse(msg, stream, &pb.PolicyUpdate{RequestMetadata: &pb.RequestMetadata{}})
 }
 
+func (s *serverInstance) handleAgreementUpdate(msg amqp.Delivery, stream pb.RabbitMQ_ConsumeServer) error {
+	logger.Debug("Starting handleAgreementUpdate")
+
+	return s.handleResponse(msg, stream, &pb.PolicyUpdate{RequestMetadata: &pb.RequestMetadata{}})
+}
+
+func (s *serverInstance) handleSharedRulesUpdate(msg amqp.Delivery, stream pb.RabbitMQ_ConsumeServer) error {
+	logger.Debug("Starting handleSharedRulesUpdate")
+
+	return s.handleResponse(msg, stream, &pb.PolicyUpdate{RequestMetadata: &pb.RequestMetadata{}})
+}
+
 func (s *serverInstance) handleRequestApprovalToApiResponse(msg amqp.Delivery, stream pb.RabbitMQ_ConsumeServer) error {
 	logger.Debug("Starting handleRequestApprovalToApiResponse")
 

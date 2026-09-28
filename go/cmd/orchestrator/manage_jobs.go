@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/Jorrit05/DYNAMOS/pkg/api"
@@ -12,6 +14,14 @@ import (
 	pb "github.com/Jorrit05/DYNAMOS/pkg/proto"
 	"github.com/google/uuid"
 )
+
+const revocationDeletesJobsEnv = "POLICY_REVOCATION_DELETE_JOBS"
+
+// Deleting job registrations on revocation is opt-in. While stewards exist that
+// the eFLINT reasoner cannot evaluate, an empty ValidDataproviders usually means
+// "could not evaluate" rather than "access revoked", and deleting would orphan
+// running jobs irrecoverably.
+var revocationDeletesJobs = strings.EqualFold(os.Getenv(revocationDeletesJobsEnv), "true")
 
 // /agents/jobs/SURF/jorrit.stutterheim@cloudnation.nl/jorrit-stutterheim-43ea82da
 // {"archetype_id":"dataThroughTtp","request_type":"sqlDataRequest","role":"computeProvider","user":{"id":"12324","user_name":"jorrit.stutterheim@cloudnation.nl"},"data_providers":["UVA"],"destination_queue":"SURF-in","job_name":"jorrit-stutterheim-43ea82da","local_job_name":"jorrit-stutterheim-43ea82dasurf1"}
@@ -22,88 +32,69 @@ import (
 // /agents/jobs/UVA/queueInfo/jorrit-stutterheim-43ea82dauva1
 // jorrit-stutterheim-43ea82dauva1
 
-func deleteJobInfo(jobNames []string, userName string, changedAgreementName string) {
-	ctx := context.Background()
-	// get all online agents
-	var agents *lib.AgentDetails
-	key := "/agents/online/"
-	activeAgents, err := etcd.GetPrefixListEtcd(etcdClient, key, agents)
-
+// checkAllJobs re-evaluates running jobs for every steward that has at least
+// one /agents/jobs/<steward>/... entry. Used after a shared-rules update, which
+// affects derivations for every agreement.
+func checkAllJobs() {
+	rootKey := "/agents/jobs/"
+	keys, err := etcd.GetFullKeysFromPrefix(etcdClient, rootKey, etcd.WithMaxElapsedTime(2*time.Second))
 	if err != nil {
-		logger.Sugar().Warnf("error get agents: %v", err)
+		logger.Sugar().Warnf("error listing job keys for global re-evaluation: %v", err)
+		return
 	}
 
-	for _, job := range jobNames {
-
-		for _, agent := range activeAgents {
-			jobInfoKey := fmt.Sprintf("/agents/jobs/%s/%s/%s", agent.Name, userName, job)
-
-			resp, err := etcdClient.Get(ctx, jobInfoKey)
-			if err != nil {
-				logger.Sugar().Errorf("error getting value from etcd: %v", err)
-			}
-
-			if len(resp.Kvs) == 0 {
-				continue
-			}
-
-			compositionRequest := &pb.CompositionRequest{}
-			err = json.Unmarshal(resp.Kvs[0].Value, compositionRequest)
-			if err != nil {
-				logger.Sugar().Errorf("failed to unmarshal JSON: %v", err)
-				return
-			}
-
-			key := fmt.Sprintf("/agents/jobs/%s/queueInfo/%s", agent.Name, compositionRequest.LocalJobName)
-			_, err = etcdClient.Delete(ctx, key)
-			if err != nil {
-				logger.Sugar().Errorf("failed to delete key: %v", err)
-				continue
-			}
-
-		}
-	}
-}
-func checkJobs(agreement *api.Agreement) {
-	// compositionRequest := &pb.CompositionRequest{}
-	for relationName, relationDetails := range agreement.Relations {
-
-		key := fmt.Sprintf("/agents/jobs/%s/%s", agreement.Name, relationName)
-
-		// Get all jobnames registered for this user of the data steward of this agreement
-		jobNames, err := etcd.GetKeysFromPrefix(etcdClient, key, etcd.WithMaxElapsedTime(2*time.Second))
-		if err != nil {
-			logger.Sugar().Warnf("error get agents: %v", err)
-		}
-		if len(jobNames) == 0 {
-			logger.Debug("no active jobs for this user")
-			return
-		}
-		for _, v := range jobNames {
-			logger.Sugar().Warnf(v)
-		}
-
-		// New agreement has no allowed archetypes
-		// Should have mapped over list, checked if any != "". This is not foolproof. Anyway.
-		if len(relationDetails.AllowedArchetypes) == 0 || (relationDetails.AllowedArchetypes[0] == "" && len(relationDetails.AllowedArchetypes) == 1) {
-			logger.Debug("This user no has no allowed archetypes")
-			if len(jobNames) > 0 {
-				deleteJobInfo(jobNames, relationName, agreement.Name)
-			}
+	stewards := make(map[string]struct{})
+	for _, k := range keys {
+		trimmed := strings.TrimPrefix(k, rootKey)
+		if trimmed == "" {
 			continue
 		}
-		evaluateArchetypeInActiveJobs(jobNames, agreement, relationName, relationDetails, c)
+		stewards[strings.SplitN(trimmed, "/", 2)[0]] = struct{}{}
+	}
 
-		// key := fmt.Sprintf("/agents/jobs/%s/%s/", agreement.Name, relationName)
-		// activeJobCompositionRequests, err := etcd.GetPrefixListEtcd(etcdClient, key, compositionRequest)
-		// if err != nil {
-		// 	logger.Sugar().Warnf("error get jobs: %v", err)
-		// }
+	if len(stewards) == 0 {
+		logger.Debug("no active stewards with running jobs; nothing to re-evaluate")
+		return
+	}
 
+	for steward := range stewards {
+		checkJobs(steward)
 	}
 }
 
-func evaluateArchetypeInActiveJobs(jobNames []string, agreement *api.Agreement, relationName string, relationDetails api.Relation, c pb.RabbitMQClient) {
+// checkJobs re-evaluates the running jobs of a single steward. The set of users
+// is derived from the etcd job keys rather than from an agreement struct, since
+// an eFLINT policy carries no machine-readable relation list.
+func checkJobs(agreementName string) {
+	key := fmt.Sprintf("/agents/jobs/%s/", agreementName)
+	jobKeys, err := etcd.GetFullKeysFromPrefix(etcdClient, key, etcd.WithMaxElapsedTime(2*time.Second))
+	if err != nil {
+		logger.Sugar().Warnf("error get jobs: %v", err)
+		return
+	}
+
+	// Key layout: /agents/jobs/<steward>/<user>/<job> -> parts[4] and parts[5].
+	userJobs := make(map[string][]string)
+	for _, k := range jobKeys {
+		parts := strings.Split(k, "/")
+		if len(parts) < 6 {
+			continue
+		}
+		userName := parts[4]
+		if userName == "queueInfo" {
+			continue
+		}
+		userJobs[userName] = append(userJobs[userName], parts[5])
+	}
+
+	logger.Sugar().Debugf("checkJobs: agreement=%q found %d user(s) with active jobs", agreementName, len(userJobs))
+	for userName, jobNames := range userJobs {
+		logger.Sugar().Debugf("checkJobs: user=%q jobs(%d)=%v", userName, len(jobNames), jobNames)
+		evaluateArchetypeInActiveJobs(jobNames, agreementName, userName, c)
+	}
+}
+
+func evaluateArchetypeInActiveJobs(jobNames []string, agreementName string, relationName string, c pb.RabbitMQClient) {
 	logger.Debug("starting evaluateArchetypeInActiveJobs")
 	ctx := context.Background()
 	// alue.ArchetypeId == archetype in current active job from the agreement name.
@@ -111,7 +102,7 @@ func evaluateArchetypeInActiveJobs(jobNames []string, agreement *api.Agreement, 
 	// for each job. Check current archetype. versus new archetypes.
 	for _, job := range jobNames {
 
-		jobInfoKey := fmt.Sprintf("/agents/jobs/%s/%s/%s", agreement.Name, relationName, job)
+		jobInfoKey := fmt.Sprintf("/agents/jobs/%s/%s/%s", agreementName, relationName, job)
 
 		resp, err := etcdClient.Get(ctx, jobInfoKey)
 		if err != nil {
@@ -132,7 +123,7 @@ func evaluateArchetypeInActiveJobs(jobNames []string, agreement *api.Agreement, 
 
 		policyUpdate := &pb.PolicyUpdate{
 			Type:            "policyUpdate",
-			User:            &pb.User{Id: relationDetails.ID, UserName: relationName},
+			User:            &pb.User{Id: relationName, UserName: relationName},
 			RequestMetadata: &pb.RequestMetadata{DestinationQueue: "policyEnforcer-in"},
 		}
 
@@ -156,8 +147,38 @@ func evaluateArchetypeInActiveJobs(jobNames []string, agreement *api.Agreement, 
 	}
 }
 
+// deleteJobAcrossAgents removes every etcd entry (job info + queueInfo) for the
+// given job across all agents that were holding it.
+func deleteJobAcrossAgents(ctx context.Context, agentsWithThisJob map[string]*pb.CompositionRequest, userName string) {
+	for agent, jobData := range agentsWithThisJob {
+		jobKey := fmt.Sprintf("/agents/jobs/%s/%s/%s", agent, userName, jobData.JobName)
+		if _, err := etcdClient.Delete(ctx, jobKey); err != nil {
+			logger.Sugar().Warnf("deleteJobAcrossAgents: error deleting job key %s: %v", jobKey, err)
+		}
+
+		queueInfoKey := fmt.Sprintf("/agents/jobs/%s/queueInfo/%s", agent, jobData.LocalJobName)
+		if _, err := etcdClient.Delete(ctx, queueInfoKey); err != nil {
+			logger.Sugar().Warnf("deleteJobAcrossAgents: error deleting queueInfo key %s: %v", queueInfoKey, err)
+		}
+	}
+}
+
 func processPolicyUpdate(ctx context.Context, agentsWithThisJob map[string]*pb.CompositionRequest, policyUpdate *pb.PolicyUpdate) {
 	logger.Sugar().Debugf("processPolicyUpdate")
+
+	// Authorisation fully revoked: there is nothing left to route to, so every
+	// running job for this user must be cleaned up.
+	vr := policyUpdate.ValidationResponse
+	if vr == nil || len(vr.ValidDataproviders) == 0 {
+		if !revocationDeletesJobs {
+			logger.Sugar().Warnf("processPolicyUpdate: no valid data providers for user %q; leaving %d job registration(s) untouched (set %s=true to enable deletion)",
+				policyUpdate.User.UserName, len(agentsWithThisJob), revocationDeletesJobsEnv)
+			return
+		}
+		logger.Sugar().Infof("processPolicyUpdate: no valid data providers — deleting all active jobs for user %q", policyUpdate.User.UserName)
+		deleteJobAcrossAgents(ctx, agentsWithThisJob, policyUpdate.User.UserName)
+		return
+	}
 
 	// TODO: Kinda threw this in without testing..
 	authorizedProviders, err := getAuthorizedProviders(policyUpdate.ValidationResponse)

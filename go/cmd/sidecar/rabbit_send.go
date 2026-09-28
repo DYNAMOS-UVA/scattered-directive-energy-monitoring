@@ -224,14 +224,19 @@ func (s *serverInstance) SendPolicyUpdate(ctx context.Context, in *pb.PolicyUpda
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	// Do other stuff
+	// Carry in.Type through as the AMQP type so consumers can distinguish
+	// "policyUpdate", "agreementUpdate" and "sharedRulesUpdate".
+	msgType := in.Type
+	if msgType == "" {
+		msgType = "policyUpdate"
+	}
 	message := amqp.Publishing{
 		CorrelationId: in.RequestMetadata.CorrelationId,
 		Body:          data,
-		Type:          "policyUpdate",
+		Type:          msgType,
 	}
 
-	logger.Sugar().Debugf("PolicyUpdate destination queue: %s", in.RequestMetadata.DestinationQueue)
+	logger.Sugar().Debugf("PolicyUpdate destination queue: %s (type: %s)", in.RequestMetadata.DestinationQueue, msgType)
 	go send(ctx, message, in.RequestMetadata.DestinationQueue, s, etcd.WithMaxElapsedTime(10*time.Second))
 	return &emptypb.Empty{}, nil
 

@@ -3,6 +3,7 @@ package etcd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -111,6 +112,61 @@ func GetKeysFromPrefix(etcdClient *clientv3.Client, key string, opts ...Option) 
 			logger.Sugar().Errorf("failed retrieving key from etcd: %v", e)
 			return []string{}, err
 		}
+	}
+
+	return keys, nil
+}
+
+// GetFullKeysFromPrefix returns the complete etcd key paths for all entries
+// under the given prefix. Unlike GetKeysFromPrefix it does not strip the path
+// down to the last segment, so callers that need to parse the full hierarchy
+// (e.g. /agents/jobs/<steward>/<user>/<job>) should use this function.
+func GetFullKeysFromPrefix(etcdClient *clientv3.Client, prefix string, opts ...Option) ([]string, error) {
+	var keys []string
+	retryOpts := DefaultRetryOptions
+
+	for _, opt := range opts {
+		opt(&retryOpts)
+	}
+
+	operation := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		resp, err := etcdClient.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithKeysOnly())
+		if err != nil {
+			return &ErrEtcdOperation{Key: prefix, Err: err}
+		}
+
+		if len(resp.Kvs) == 0 {
+			notFound := &ErrKeyNotFound{Key: prefix}
+			if retryOpts.StopOnMissing {
+				return bo.Permanent(notFound)
+			}
+			return notFound
+		}
+
+		keys = keys[:0]
+		for _, ev := range resp.Kvs {
+			keys = append(keys, string(ev.Key))
+		}
+		return nil
+	}
+
+	backoff := bo.NewExponentialBackOff()
+	backoff.InitialInterval = retryOpts.InitialInterval
+	backoff.MaxInterval = retryOpts.MaxInterval
+	backoff.MaxElapsedTime = retryOpts.MaxElapsedTime
+
+	err := bo.Retry(operation, backoff)
+	if err != nil {
+		var notFound *ErrKeyNotFound
+		if errors.As(err, &notFound) {
+			logger.Sugar().Infof("GetFullKeysFromPrefix: no keys found under prefix %q", prefix)
+			return []string{}, nil
+		}
+		logger.Sugar().Errorf("GetFullKeysFromPrefix: failed retrieving keys from etcd: %v", err)
+		return []string{}, err
 	}
 
 	return keys, nil

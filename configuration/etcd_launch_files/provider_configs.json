@@ -1,0 +1,17 @@
+[
+    {
+        "name": "VU",
+        "validationStrategy": "eflint",
+        "agreementLocation": "/app/eflint-models/VU.eflint"
+    },
+    {
+        "name": "UVA",
+        "validationStrategy": "eflint",
+        "agreementLocation": "/app/eflint-models/UVA.eflint"
+    },
+    {
+        "name": "RUG",
+        "validationStrategy": "legacy",
+        "agreementLocation": "/policyEnforcer/agreements/RUG"
+    }
+]

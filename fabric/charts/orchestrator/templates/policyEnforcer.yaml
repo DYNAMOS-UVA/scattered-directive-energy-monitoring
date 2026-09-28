@@ -67,3 +67,19 @@ spec:
       - name: eflint-models
         persistentVolumeClaim:
           claimName: etcd-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: policy-enforcer
+  namespace: {{ .Values.Namespace }}
+spec:
+  selector:
+    app: policy-enforcer
+  ports:
+    - name: http-policy-enforcer-api
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

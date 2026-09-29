@@ -17,6 +17,7 @@ ORCH_PORT="${ORCH_PORT:-18082}"
 PE_PORT="${PE_PORT:-18083}"
 CYCLES="${CYCLES:-5}"
 POLICY_CHECK_INTERVAL="${POLICY_CHECK_INTERVAL:-1}"
+TRAINING_BACKTRACK="${TRAINING_BACKTRACK:-0}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-5}"
 MAX_POLLS="${MAX_POLLS:-120}"
 
@@ -82,6 +83,18 @@ restore_policies() {
     done
 }
 
+# restore_requestor <steward> — re-grants the requestor mid-scenario by uploading
+# the original model, and stops the exit handler from restoring it a second time.
+restore_requestor() {
+    local steward="$1" s remaining=()
+    log "Reintroducing ${REQUESTOR} at ${steward}"
+    put_policy "$steward" "${EFLINT_DIR}/${steward}.eflint" || fail "policy restore for ${steward} was rejected"
+    for s in "${MODIFIED_STEWARDS[@]+"${MODIFIED_STEWARDS[@]}"}"; do
+        [ "$s" = "$steward" ] || remaining+=("$s")
+    done
+    MODIFIED_STEWARDS=("${remaining[@]+"${remaining[@]}"}")
+}
+
 cleanup() {
     local exit_code=$?
     restore_policies
@@ -118,7 +131,7 @@ FINAL_STATUS_FILE="/tmp/vfl-scenario-final-status.json"
 REQUEST_ID=""
 
 submit_vfl_request() {
-    log "Submitting vflTrainModelRequest (cycles=${CYCLES}, policy_check_interval=${POLICY_CHECK_INTERVAL})"
+    log "Submitting vflTrainModelRequest (cycles=${CYCLES}, policy_check_interval=${POLICY_CHECK_INTERVAL}, training_backtrack=${TRAINING_BACKTRACK})"
     local response
 
     response=$(curl -sS -X POST "${API_BASE_URL}/requestApproval" \
@@ -136,7 +149,7 @@ submit_vfl_request() {
                     \"policy_check_interval\": ${POLICY_CHECK_INTERVAL},
                     \"policy_removal\": -1,
                     \"policy_reintroduction\": -1,
-                    \"training_backtrack\": 0,
+                    \"training_backtrack\": ${TRAINING_BACKTRACK},
                     \"communication_frequency\": 15,
                     \"sample_batch_size\": 256
                 },
@@ -157,7 +170,7 @@ fetch_status() {
         -H "Host: api-gateway.api-gateway.svc.cluster.local"
 }
 
-# json_field <json> <status|rounds> — extracts a field from a status JSON string.
+# json_field <json> <status|rounds|last_clients> — extracts a field from a status JSON string.
 json_field() {
     python3 -c 'import json, sys
 try:
@@ -165,7 +178,53 @@ try:
 except json.JSONDecodeError:
     print("")
     raise SystemExit
-print(d.get("status", "") if sys.argv[2] == "status" else len(d.get("results") or []))' "$1" "$2"
+results = d.get("results") or []
+field = sys.argv[2]
+if field == "status":
+    print(d.get("status", ""))
+elif field == "rounds":
+    print(len(results))
+elif field == "last_clients":
+    print(results[-1].get("clients", "") if results else "")' "$1" "$2"
+}
+
+# wait_until_rounds <n> — polls until at least n rounds are recorded; fails if
+# the run finishes first.
+wait_until_rounds() {
+    local target="$1" status_response status rounds poll
+    log "Waiting until ${target} rounds have completed"
+    for (( poll=1; poll<=MAX_POLLS; poll++ )); do
+        status_response=$(fetch_status)
+        status=$(json_field "$status_response" status)
+        rounds=$(json_field "$status_response" rounds)
+        echo "[${poll}] status=${status} rounds=${rounds} clients=$(json_field "$status_response" last_clients)"
+
+        if [ "$status" = "done" ] || [ "$status" = "failed" ]; then
+            fail "run finished (${status}) after ${rounds} rounds, before reaching ${target}; raise CYCLES"
+        fi
+        [ "${rounds:-0}" -ge "$target" ] && return
+        sleep "$POLL_INTERVAL_SECONDS"
+    done
+    fail "timed out waiting for ${target} rounds"
+}
+
+# wait_until_client_count <n> — polls until the latest round trained with n clients.
+wait_until_client_count() {
+    local target="$1" status_response status clients poll
+    log "Waiting until a round trains with ${target} clients"
+    for (( poll=1; poll<=MAX_POLLS; poll++ )); do
+        status_response=$(fetch_status)
+        status=$(json_field "$status_response" status)
+        clients=$(json_field "$status_response" last_clients)
+        echo "[${poll}] status=${status} rounds=$(json_field "$status_response" rounds) clients=${clients}"
+
+        if [ "$status" = "done" ] || [ "$status" = "failed" ]; then
+            fail "run finished (${status}) before any round trained with ${target} clients"
+        fi
+        [ "$clients" = "$target" ] && return
+        sleep "$POLL_INTERVAL_SECONDS"
+    done
+    fail "timed out waiting for a round with ${target} clients"
 }
 
 # wait_for_vfl_request — polls until done/failed and writes the final status
@@ -217,6 +276,21 @@ elif field == "rounds":
     print(len(results))
 elif field == "client_counts":
     print(" ".join(sorted({str(r.get("clients")) for r in results})))
+elif field == "client_runs":
+    # Per-round client counts with consecutive repeats collapsed, e.g. "3 2 3".
+    runs = []
+    for r in results:
+        if not runs or runs[-1] != r.get("clients"):
+            runs.append(r.get("clients"))
+    print(" ".join(str(x) for x in runs))
+elif field == "first_run_length":
+    first = results[0].get("clients") if results else None
+    n = 0
+    for r in results:
+        if r.get("clients") != first:
+            break
+        n += 1
+    print(n)
 elif field == "stop_reason":
     print((d.get("metadata") or {}).get("stop_reason", ""))' "$FINAL_STATUS_FILE" "$1"
 }

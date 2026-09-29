@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -238,6 +239,14 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 	var mu sync.Mutex
 	responses := map[string]string{}
 
+	// Fixed client order: embedding i and gradient i must belong to the same client,
+	// and each client must keep its column slot across rounds and resizes.
+	clientOrder := make([]string, 0, len(clients))
+	for auth := range clients {
+		clientOrder = append(clientOrder, auth)
+	}
+	sort.Strings(clientOrder)
+
 	for auth, url := range clients {
 
 		logger.Sugar().Info("Sending training request to client: ", auth, " at url: ", url)
@@ -314,7 +323,7 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 	// }
 	// Collect embeddings from all clients
 	embeddingList := []string{}
-	for approved_client := range clients {
+	for _, approved_client := range clientOrder {
 		if emb, ok := responses[strings.ToLower(approved_client)]; ok {
 			embeddingList = append(embeddingList, emb)
 		}
@@ -353,9 +362,12 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 		gradients = append(gradients, val.GetStringValue())
 	}
 
-	// TODO: Send the gradients back to the client to update their models
-	index := 0
-	for auth, url := range clients {
+	if len(gradients) != len(clientOrder) {
+		return accuracy, fmt.Errorf("server returned %d gradients for %d clients", len(gradients), len(clientOrder))
+	}
+
+	for index, auth := range clientOrder {
+		url := clients[auth]
 		wg.Add(1)
 		target := strings.ToLower(auth)
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/vflTrainRequest/%s", url, target)
@@ -367,8 +379,6 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 		}
 
 		logger.Sugar().Info("Sending gradient descent request to client: ", auth, " at url: ", url)
-
-		index++
 
 		dataRequestJson, err := json.Marshal(dataRequest)
 		if err != nil {

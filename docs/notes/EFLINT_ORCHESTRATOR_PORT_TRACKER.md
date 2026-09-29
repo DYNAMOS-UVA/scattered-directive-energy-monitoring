@@ -23,9 +23,10 @@ Upstream clone used for diffing: `git clone https://github.com/DYNAMOS-UVA/DYNAM
 | 4 | S3, O15, O16, O17, O14 — correctness fixes | **Mostly done 2026-09-29.** S3, O15, O16, O17 implemented and deployed (VFL S1–S3 ran on them); O14's revocation path landed in step 2 behind the G2 guard. Remainder of O14 outstanding. |
 | 5 | P3 — drop vendored `cmd/policy-enforcer/pkg` + go.mod/go.sum | Not started |
 
-**VFL:** scenarios S1–S3 pass end to end with the eFLINT enforcer (2026-09-29);
-S4 (one client) and S5 (server revoked mid-run, periodic policy check) are
-scripted. See [VFL_EFLINT_POLICY_SCENARIOS.md](VFL_EFLINT_POLICY_SCENARIOS.md).
+**VFL:** scenarios S1–S3 and S5 (server revoked mid-run) pass end to end with
+the eFLINT enforcer (2026-09-29). S4 (one client), S6 (client excluded mid-run)
+and S7 (excluded then reintroduced) are scripted. See
+[VFL_EFLINT_POLICY_SCENARIOS.md](VFL_EFLINT_POLICY_SCENARIOS.md).
 
 Open risks: **G5** (`getJobAcrossAgents` returns an empty map — causes spurious
 denials), **G3** (stale job records), **G6** (Linkerd cert rotation).
@@ -623,17 +624,16 @@ The port is functionally complete: policies can be changed through the
 orchestrator, and the VFL workflow passes S1–S3 against the eFLINT enforcer.
 What remains, in order:
 
-1. **Run VFL scenarios S4 and S5** — `scripts/vfl-scenario-s4-one-client.sh`
-   and `scripts/vfl-scenario-s5-server-revoked-midrun.sh` (needs the
-   api-gateway redeployed with the periodic check).
+1. **Run VFL scenarios S4, S6 and S7** — see the VFL doc §6.5. S6/S7 need the
+   api-gateway redeployed with the client-ordering fix.
 2. **Lighter VFL policy check** — re-check with the policy enforcer only,
    without re-composing the job in the orchestrator. Cuts the per-check cost
    and stops the job-record growth described under G3.
 3. **Replace `policyRemoval` / `policyReintroduction`** — the api-gateway still
    sends these message types, which the eFLINT enforcer does not handle
    (`unknown message type`). They become
-   `PUT /api/v1/policyEnforcer/{steward}`. Prerequisite for the dynamic
-   client scenario S6.
+   `PUT /api/v1/policyEnforcer/{steward}`, so mid-run changes can be triggered
+   from the training loop itself (today the scenario scripts trigger them).
 4. **Step 4 remainder — O14.** `manage_jobs.go`: per-agent revocation,
    `continue` instead of `return`, empty-routing-key guard. Now that S1–S3
    give a known-good baseline, it can be done as a focused change.

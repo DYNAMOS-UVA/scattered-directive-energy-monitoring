@@ -173,7 +173,8 @@ func pickArchetypeBasedOnWeight() (*api.Archetype, error) {
 	return lightest, nil
 }
 
-func getArchetypeBasedOnOptions(validationResponse *pb.ValidationResponse, authorizedDataProviders map[string]lib.AgentDetails) string {	logger.Sugar().Debugf("Start getArchetypeBasedOnOptions, options: %v", validationResponse.Options)
+func getArchetypeBasedOnOptions(validationResponse *pb.ValidationResponse, authorizedDataProviders map[string]lib.AgentDetails) string {
+	logger.Sugar().Debugf("Start getArchetypeBasedOnOptions, options: %v", validationResponse.Options)
 
 	// This ranges over the options. And selects an archetype based on the options.
 	for option, value := range validationResponse.Options {

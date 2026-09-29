@@ -1,0 +1,44 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// DYNAMOS Policy Enforcer — Agreement: server (VFL)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Layer 2b — Per-steward agreement for the VFL aggregation server.
+// Stored in etcd at /policyEnforcer/eflintModels/server.
+//
+// Requires (loaded by the policy enforcer in this order):
+//   1. 01_interface_policy.eflint  (embedded with the enforcer binary)
+//   2. 02_agreement_rules.eflint   (etcd /policyEnforcer/eflintRules/shared)
+//   3. this file                   (etcd /policyEnforcer/eflintModels/server)
+//   4. Layer-3 request facts       (generated per request)
+//
+// The server relation is MANDATORY for a VFL run: removing +has-relation below
+// blocks the whole request (scenario S2). See
+// docs/notes/VFL_EFLINT_POLICY_SCENARIOS.md.
+//
+// Both vflTrainModelRequest and vflTrainRequest are allowed so that request-type
+// enforcement, if switched on later, does not accidentally deny the run.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Type instances referenced by this agreement.
++data-steward("server").
++archetype("computeToData").
++compute-provider("server").
++dataset("outcomeData").
++request-type("vflTrainModelRequest").
++request-type("vflTrainRequest").
+
++agreement("server").
+
+// Archetypes supported at the agreement level.
++steward-supports-archetype("server", "computeToData").
+
+// Compute providers accepted by the server.
++steward-supports-compute-provider("server", "server").
+
+// ── Relation: requestor ─────────────────────────
++has-relation("requestor", "server").
++relation-allows-request-type("requestor", "server", "vflTrainModelRequest").
++relation-allows-request-type("requestor", "server", "vflTrainRequest").
++relation-allows-dataset("requestor", "server", "outcomeData").
++relation-allows-archetype("requestor", "server", "computeToData").
++relation-allows-compute-provider("requestor", "server", "server").

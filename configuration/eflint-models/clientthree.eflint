@@ -1,0 +1,41 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// DYNAMOS Policy Enforcer — Agreement: clientthree (VFL)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Layer 2b — Per-steward agreement for VFL client 3.
+// Stored in etcd at /policyEnforcer/eflintModels/clientthree.
+//
+// Requires (loaded by the policy enforcer in this order):
+//   1. 01_interface_policy.eflint  (embedded with the enforcer binary)
+//   2. 02_agreement_rules.eflint   (etcd /policyEnforcer/eflintRules/shared)
+//   3. this file                   (etcd /policyEnforcer/eflintModels/clientthree)
+//   4. Layer-3 request facts       (generated per request)
+//
+// This is the client used by the removal/reintroduction demos, so it is the
+// natural one to drop for scenario S3. See
+// docs/notes/VFL_EFLINT_POLICY_SCENARIOS.md.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Type instances referenced by this agreement.
++data-steward("clientthree").
++archetype("computeToData").
++compute-provider("clientthree").
++dataset("clientthreeData").
++request-type("vflTrainModelRequest").
++request-type("vflTrainRequest").
+
++agreement("clientthree").
+
+// Archetypes supported at the agreement level.
++steward-supports-archetype("clientthree", "computeToData").
+
+// Compute providers accepted by clientthree.
++steward-supports-compute-provider("clientthree", "clientthree").
+
+// ── Relation: requestor ─────────────────────────
++has-relation("requestor", "clientthree").
++relation-allows-request-type("requestor", "clientthree", "vflTrainModelRequest").
++relation-allows-request-type("requestor", "clientthree", "vflTrainRequest").
++relation-allows-dataset("requestor", "clientthree", "clientthreeData").
++relation-allows-archetype("requestor", "clientthree", "computeToData").
++relation-allows-compute-provider("requestor", "clientthree", "clientthree").

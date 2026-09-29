@@ -200,6 +200,12 @@ func startTraining(protoRequest *pb.RequestApproval, dataRequestInterface map[st
 		var response []byte
 
 		if apiReqApproval.Type == "vflTrainModelRequest" {
+			if admitted, reason := vflPolicyAdmits(msg.AuthorizedProviders); !admitted {
+				logger.Sugar().Errorf("VFL request rejected: %s", reason)
+				rejectTrainingRequest(requestID)
+				return
+			}
+
 			ctxWithoutCancel := context.WithoutCancel(r.Context())
 			response = runVFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId, ctxWithoutCancel, requestID)
 
@@ -385,6 +391,48 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 	wg.Wait()
 
 	return accuracy, nil
+}
+
+// vflPolicyAdmits applies the VFL admission rule to the providers the policy
+// enforcer authorised: the server is mandatory and at least one client must
+// remain. Returns a reason when the request is not admissible.
+func vflPolicyAdmits(authorizedProviders map[string]string) (bool, string) {
+	serverAuthorized := false
+	clientCount := 0
+
+	for name := range authorizedProviders {
+		if strings.ToLower(name) == "server" {
+			serverAuthorized = true
+			continue
+		}
+		clientCount++
+	}
+
+	switch {
+	case !serverAuthorized:
+		return false, "the server is not authorized by policy"
+	case clientCount == 0:
+		return false, "no clients are authorized by policy"
+	default:
+		return true, ""
+	}
+}
+
+// rejectTrainingRequest marks a request failed before training started and frees
+// the single active-job slot, which runVFLTraining would otherwise release.
+func rejectTrainingRequest(requestID string) {
+	v, ok := trainingRequests.Load(requestID)
+	if ok {
+		reqData := v.(TrainingRequestData)
+		reqData.Status = StatusFailed
+		trainingRequests.Store(requestID, reqData)
+	} else {
+		logger.Sugar().Error("Could not find the training request to update status.")
+	}
+
+	activeJobLock.Lock()
+	activeJobID = ""
+	activeJobLock.Unlock()
 }
 
 func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]string, jobId string, ctx context.Context, requestID string) []byte {
@@ -618,6 +666,7 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 				logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 				logger.Sugar().Info("   Policy does not allow this training to continue.")
 				logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+				trainingFailed = true
 				break
 			}
 
@@ -654,6 +703,14 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 
 			logger.Sugar().Debug("Clients: ", clients)
 			numClients = len(clients)
+
+			if admitted, reason := vflPolicyAdmits(msg.AuthorizedProviders); !admitted {
+				logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+				logger.Sugar().Infof("   Stopping training at round %d: %s", round, reason)
+				logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+				trainingFailed = true
+				break
+			}
 
 			logger.Sugar().Info("- Sending training request")
 			accuracy, err := runVFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate, trainingBacktrack)

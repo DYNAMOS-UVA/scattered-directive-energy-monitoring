@@ -17,9 +17,8 @@ archetype/dataset genuinely enforceable may require changes to the eFLINT
 Layer-2 files; deliberately deferred.
 
 **Actors.** One `server` steward and three client stewards (`clientone`,
-`clienttwo`, `clientthree`). The requester is currently
-`evangelos.pipilikas@student.uva.nl` — the only user with relations in
-`configuration/etcd_launch_files/agreements.json`.
+`clienttwo`, `clientthree`). The requester is `requestor` in every eFLINT
+model, in `agreements.json` and in the example request scripts.
 
 ---
 
@@ -79,20 +78,29 @@ client contributes no embeddings and the server model architecture shrinks to
 `2 × intermediate_neurons` (`update_server_model_architecture` already handles
 this).
 
+### S4 — Minimal client permission
+
+**Policy:** requester permitted at `server` + exactly **one** client.
+
+**Expected:** request admitted — one client is the boundary case of
+"≥ 1 client"; VFL runs with a single client and the server model shrinks to
+`1 × intermediate_neurons`.
+
 ### Summary
 
-| Scenario | server | clients permitted | C1 | Training |
-|---|---|---|---|---|
-| S1 | yes | 3 | admit | 3 clients |
-| S2 | **no** | any | **reject** | does not start |
-| S3 | yes | 2 | admit | 2 clients |
+| Scenario | server | clients permitted | C1 | Training | Script | Result |
+|---|---|---|---|---|---|---|
+| S1 | yes | 3 | admit | 3 clients | `single_request.sh` | **pass** 2026-09-29 |
+| S2 | **no** | any | **reject** | does not start | `vfl-scenario-s2-server-denied.sh` | **pass** 2026-09-29 |
+| S3 | yes | 2 | admit | 2 clients | `vfl-scenario-s3-two-clients.sh` | **pass** 2026-09-29 |
+| S4 | yes | 1 | admit | 1 client | `vfl-scenario-s4-one-client.sh` | not yet run |
 
-### Future — S4, dynamic policy change mid-run
+### Future — S5, dynamic policy change mid-run
 
 A policy change lands *while* training is running; at the next C2 the client set
 changes and the VFL training configuration adapts in real time (client dropped
 or reintroduced, server architecture resized, optionally backtracking to a saved
-checkpoint). Not in scope yet, but S1–S3 are deliberately shaped so that S4 is
+checkpoint). Not in scope yet, but S1–S4 are deliberately shaped so that S5 is
 just "S1 → S3 → S1 without restarting".
 
 ---
@@ -151,10 +159,15 @@ Content-Type: text/plain
 This is already implemented and verified end to end (T3/T5 in the tracker), and
 it makes the policy change *real* rather than hardcoded.
 
-### 6.2 Enforce "server mandatory, ≥1 client"
+### 6.2 Enforce "server mandatory, ≥1 client" — **done 2026-09-29, option (b)**
 
-Not expressed anywhere today. The per-round handler only deletes unauthorised
-providers from `clients`; it never checks that `server` survived. Two options:
+Implemented in the api-gateway as `vflPolicyAdmits`, applied at C1 (request
+rejected, status `failed`, active-job slot released) and at C2 (training
+stops). It also fixed a
+pre-existing bug: a per-round denial only broke out of the `select`, so
+training carried on. Option (a) is still the long-term home.
+
+The two options considered:
 
 - **(a) In eFLINT** — a Layer-2 rule making admissibility depend on the server
   relation. Most faithful to the policy-as-code goal, but needs the request
@@ -165,37 +178,61 @@ providers from `clients`; it never checks that `server` survived. Two options:
 (b) is the pragmatic first step and is enough for S1–S3; (a) is the better
 long-term home.
 
-### 6.3 Verify reintroduction actually re-adds clients
+### 6.3 Reintroduction re-adds clients — **already implemented**
 
-The C2 handler deletes providers missing from the response. A comment says
-*"or add the authorised ones if they were not present before"*, but the visible
-code only deletes. If so, S4 (and `policy_reintroduction`) cannot work until
-re-adding is implemented.
+On closer reading, the C2 handler does both: it deletes providers missing from
+the response, then re-adds any authorised non-server provider that is not in
+`clients`. S5 needs no new code for this; it still needs testing.
 
-### 6.4 eFLINT models for the VFL stewards
+### 6.4 eFLINT models for the VFL stewards — **done 2026-09-29**
 
-The VFL stewards are currently served by the **legacy JSON** agreements
-translated into eFLINT phrases, which works. To drive S1–S3 by *editing policy*,
-each steward needs a real `.eflint` model (like `VU.eflint`) plus a
-`provider_configs.json` entry with `validationStrategy: "eflint"`. Without this
-the `PUT /policyEnforcer/{steward}` flow has nothing meaningful to update.
+`server.eflint` and `client{one,two,three}.eflint` created and switched to
+`eflint` in `provider_configs.json`. Originals backed up in
+`configuration/eflint-models/backup-2026-09-29/`. To produce S2–S4, remove the
+requestor's **whole relation block** (every line containing `"requestor"`) from
+`server.eflint` or from the relevant client models. Removing only `+has-relation` is not
+enough: every `relation-allows-*` fact is `Conditioned by has-relation` in
+`02_agreement_rules.eflint`, so leaving them would assert facts whose
+condition fails.
+
+### 6.5 Running the scenarios
+
+S1 was confirmed with `scripts/single_request.sh` on 2026-09-29; S2 and S3 with
+the scripts below on the same day.
+
+```bash
+bash scripts/vfl-scenario-s2-server-denied.sh
+bash scripts/vfl-scenario-s3-two-clients.sh                  # drops clientthree
+DROPPED_CLIENT=clientone bash scripts/vfl-scenario-s3-two-clients.sh
+bash scripts/vfl-scenario-s4-one-client.sh                   # keeps clientone
+KEPT_CLIENT=clienttwo bash scripts/vfl-scenario-s4-one-client.sh
+```
+
+Each script revokes the requestor through
+`PUT /api/v1/policyEnforcer/{steward}` (the real update path), prints the
+policy enforcer's verdict, runs a `vflTrainModelRequest`, checks the outcome
+(S2: `failed` with 0 rounds; S3/S4: `done` with 2/1 clients every round) and
+**always restores the original policy on exit**. The repo's `.eflint` files are
+never modified — only the live copy in etcd. Shared logic lives in
+`scripts/vfl-scenario-common.sh`. `CYCLES` defaults to 5.
+
+If a script is killed without running its exit handler (e.g. `kill -9`), etcd
+keeps the revoked policy; restore it with `GET /api/v1/updateEtc`.
 
 ---
 
 ## 7. Suggested order of work
 
-1. **Baseline** — run VFL end to end unchanged, confirm S1 works with the new
-   enforcer. Nothing to build; this is tracker test T7.
-2. **eFLINT models for `server` + the three clients** (§6.4), then re-confirm S1.
-   Mechanical: mirror `VU.eflint` per steward.
-3. **S2 and S3 by static policy** — author the models with the server relation
-   removed (S2) / one client relation removed (S3) and confirm the expected
-   behaviour. Requires §6.2 for S2 to reject rather than silently continue.
-4. **S2/S3 by live policy change** — same scenarios driven through
-   `PUT /api/v1/policyEnforcer/{steward}` instead of editing files up front.
+Steps 1–4 are **done** (2026-09-29); S4 is scripted and awaiting its first run.
+
+1. ~~**Baseline** — S1 with the new enforcer.~~ Done.
+2. ~~**eFLINT models for `server` + the three clients** (§6.4).~~ Done.
+3. ~~**Server-mandatory check** (§6.2).~~ Done.
+4. ~~**S2/S3 by live policy change** through
+   `PUT /api/v1/policyEnforcer/{steward}`.~~ Done, scripted.
 5. **Replace `policyRemoval`/`policyReintroduction`** (§6.1) with that PUT, so
    mid-run changes are triggered from the training loop.
-6. **S4** — dynamic mid-run change, after §6.3 is confirmed.
+6. **S5** — dynamic mid-run change.
 
-Steps 1–3 need no new orchestrator code; they exercise what the port already
-delivered.
+None of steps 1–4 needed new orchestrator code beyond the port itself; the only
+code change was the api-gateway admission check.

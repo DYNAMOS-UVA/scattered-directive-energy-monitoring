@@ -1,0 +1,41 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// DYNAMOS Policy Enforcer — Agreement: clienttwo (VFL)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Layer 2b — Per-steward agreement for VFL client 2.
+// Stored in etcd at /policyEnforcer/eflintModels/clienttwo.
+//
+// Requires (loaded by the policy enforcer in this order):
+//   1. 01_interface_policy.eflint  (embedded with the enforcer binary)
+//   2. 02_agreement_rules.eflint   (etcd /policyEnforcer/eflintRules/shared)
+//   3. this file                   (etcd /policyEnforcer/eflintModels/clienttwo)
+//   4. Layer-3 request facts       (generated per request)
+//
+// Removing +has-relation below drops this client from the training run while
+// the run continues with the remaining clients (scenario S3). See
+// docs/notes/VFL_EFLINT_POLICY_SCENARIOS.md.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Type instances referenced by this agreement.
++data-steward("clienttwo").
++archetype("computeToData").
++compute-provider("clienttwo").
++dataset("clienttwoData").
++request-type("vflTrainModelRequest").
++request-type("vflTrainRequest").
+
++agreement("clienttwo").
+
+// Archetypes supported at the agreement level.
++steward-supports-archetype("clienttwo", "computeToData").
+
+// Compute providers accepted by clienttwo.
++steward-supports-compute-provider("clienttwo", "clienttwo").
+
+// ── Relation: requestor ─────────────────────────
++has-relation("requestor", "clienttwo").
++relation-allows-request-type("requestor", "clienttwo", "vflTrainModelRequest").
++relation-allows-request-type("requestor", "clienttwo", "vflTrainRequest").
++relation-allows-dataset("requestor", "clienttwo", "clienttwoData").
++relation-allows-archetype("requestor", "clienttwo", "computeToData").
++relation-allows-compute-provider("requestor", "clienttwo", "clienttwo").

@@ -13,5 +13,25 @@
         "name": "RUG",
         "validationStrategy": "legacy",
         "agreementLocation": "/policyEnforcer/agreements/RUG"
+    },
+    {
+        "name": "server",
+        "validationStrategy": "eflint",
+        "agreementLocation": "/app/eflint-models/server.eflint"
+    },
+    {
+        "name": "clientone",
+        "validationStrategy": "eflint",
+        "agreementLocation": "/app/eflint-models/clientone.eflint"
+    },
+    {
+        "name": "clienttwo",
+        "validationStrategy": "eflint",
+        "agreementLocation": "/app/eflint-models/clienttwo.eflint"
+    },
+    {
+        "name": "clientthree",
+        "validationStrategy": "eflint",
+        "agreementLocation": "/app/eflint-models/clientthree.eflint"
     }
 ]

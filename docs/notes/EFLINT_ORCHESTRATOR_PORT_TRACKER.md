@@ -20,8 +20,11 @@ Upstream clone used for diffing: `git clone https://github.com/DYNAMOS-UVA/DYNAM
 | 1 | S5 + O11 + O8 + O9 — populate etcd from the PVC | **Done — deployed and verified 2026-09-28** |
 | 2 | S1 + O12 + O13 — `checkJobs` by steward name | **Done — verified in-cluster 2026-09-28** |
 | 3 | O5 + O6 + O2 + O1 + O3 (+ SC1–SC3) — policy update endpoint | **Done — fully verified 2026-09-29 (T3–T6)** |
-| 4 | S3, O15, O16, O17, O14 — correctness fixes | **Mostly done 2026-09-29.** S3, O15, O16, O17 implemented; O14's revocation path landed in step 2 behind the G2 guard. Remainder of O14 outstanding. Not yet deployed. |
+| 4 | S3, O15, O16, O17, O14 — correctness fixes | **Mostly done 2026-09-29.** S3, O15, O16, O17 implemented and deployed (VFL S1–S3 ran on them); O14's revocation path landed in step 2 behind the G2 guard. Remainder of O14 outstanding. |
 | 5 | P3 — drop vendored `cmd/policy-enforcer/pkg` + go.mod/go.sum | Not started |
+
+**VFL:** scenarios S1–S3 pass end to end with the eFLINT enforcer (2026-09-29);
+S4 scripted. See [VFL_EFLINT_POLICY_SCENARIOS.md](VFL_EFLINT_POLICY_SCENARIOS.md).
 
 Open risks: **G5** (`getJobAcrossAgents` returns an empty map — causes spurious
 denials), **G3** (stale job records), **G6** (Linkerd cert rotation).
@@ -244,6 +247,35 @@ Note: `go test ./pkg/lib/` reports two **pre-existing** failures,
 isolation and fail only in full-suite order — map-iteration-order flakes in set
 helpers, unrelated to this work.
 
+### 2026-09-29 — VFL groundwork: admission check, VFL eFLINT models, requester rename
+
+- **api-gateway** `requests.go`: new `vflPolicyAdmits` enforces
+  *server mandatory, ≥1 client* on the policy enforcer's `AuthorizedProviders`,
+  at the initial approval (request rejected, status `failed`) and after every
+  round (training stops). See `VFL_EFLINT_POLICY_SCENARIOS.md` §6.2.
+- **Pre-existing bug fixed:** a per-round denial (`msg.Error != ""`) did
+  `break`, but that only exits the `select`, so training carried on with the
+  next round. It now sets `trainingFailed` so the outer loop stops.
+- **Backup:** all `.eflint` files copied to
+  `configuration/eflint-models/backup-2026-09-29/` before any change.
+- **New models:** `server.eflint`, `clientone.eflint`, `clienttwo.eflint`,
+  `clientthree.eflint`, mirroring `VU.eflint`: `computeToData` only, each
+  steward is its own compute provider, one dataset per steward, and both
+  `vflTrainModelRequest` and `vflTrainRequest` allowed. Archetype/dataset are
+  deliberately permissive for now.
+- **`provider_configs.json`:** the four VFL stewards switched to
+  `validationStrategy: eflint`.
+- **Requester renamed to `requestor`** in `VU/UVA.eflint`, the four new models,
+  `agreements.json` (the legacy fallback) and `scripts/single_request.sh` /
+  `scripts/smoke_request.sh`. Not changed: the `generated_validation_bundle_*`
+  test artefacts, and `jorrit05` in `rename-dockerhub.sh` (a Docker Hub
+  account, not a requester).
+
+Deployed and verified 2026-09-29: VFL scenarios S1, S2 and S3 pass (see the VFL
+doc). A follow-up fix makes an S2 rejection release the api-gateway's single
+active-job slot; without it every later request got `429 A training job is
+already in progress`.
+
 ---
 
 ## 4. Sidecar (`go/cmd/sidecar`) — discovered 2026-09-28
@@ -282,7 +314,7 @@ GET /api/v1/policy-enforcer/allowed-clauses?steward=clientone&requester=evangelo
 -> {"supported_archetypes":["computeToData"],"relations":[{"request_types":["vflTrainRequest"],...}]}
 
 POST /api/v1/policy-enforcer/validate
-  {"user":{"id":"1234","user_name":"evangelos.pipilikas@student.uva.nl"},
+  {"user":{"id":"1234","user_name":"requestor"},
    "data_providers":["clientone","clienttwo","clientthree","server"]}
 -> "request_approved": true
    all four stewards in valid_dataproviders with computeToData
@@ -438,7 +470,7 @@ is unreachable, so the DYNAMOS containers crash-loop instead of waiting.
 | T4b — O13 + G2 guard | Pass. A `sharedRules` PUT fanned out across all stewards: **25** `leaving N job registration(s) untouched` warnings (matching the 25 `Jorrit` jobs under UVA), **0** `deleting all active jobs` lines, job count steady at **37**. Pre-guard, those 25 would all have hit `deleteJobAcrossAgents`. |
 | T5 — invalid eFLINT → `400` | **Pass (2026-09-29).** `400 Policy update rejected by Policy Enforcer`. |
 | T6 — `GET /policyEnforcer[/VU]` | **Pass (2026-09-29).** `200` with the legacy Agreement JSON for VU, read from the `/agreements/` sub-prefix — confirms O3. |
-| T7 — VFL end to end | **Unblocked.** Policy enforcer approves the VFL request (`request_approved: true`, all four stewards valid). Full end-to-end run still to be done. |
+| T7 — VFL end to end | **Pass (2026-09-29).** VFL scenario S1 runs with all three clients; S2 and S3 also pass. |
 
 ---
 
@@ -482,7 +514,7 @@ Expect `200 OK` and `configs/VU` restored as
 ```bash
 # Baseline
 curl -sS -G "http://127.0.0.1:18083/api/v1/policy-enforcer/allowed-clauses" \
-  --data-urlencode "steward=VU" --data-urlencode "requester=Jorrit"
+  --data-urlencode "steward=VU" --data-urlencode "requester=requestor"
 # -> supported_archetypes: ["dataThroughTtp","computeToData"]
 
 # Comment out +steward-supports-archetype("VU","dataThroughTtp"). in
@@ -492,7 +524,7 @@ curl -i -X PUT "http://127.0.0.1:18082/api/v1/policyEnforcer/VU" \
 # -> 200 OK, after a short pause (the pause IS awaitPolicyEnforcerAck)
 
 curl -sS -G "http://127.0.0.1:18083/api/v1/policy-enforcer/allowed-clauses" \
-  --data-urlencode "steward=VU" --data-urlencode "requester=Jorrit"
+  --data-urlencode "steward=VU" --data-urlencode "requester=requestor"
 # -> supported_archetypes: ["computeToData"]
 
 # Restore the line and PUT again -> both archetypes return.
@@ -546,7 +578,7 @@ First, confirm the enforcer approves the request (this passes as of 2026-09-29):
 
 ```bash
 cat > /tmp/vfl.json <<'EOF'
-{"user":{"id":"1234","user_name":"evangelos.pipilikas@student.uva.nl"},
+{"user":{"id":"1234","user_name":"requestor"},
  "data_providers":["clientone","clienttwo","clientthree","server"]}
 EOF
 curl -sS -X POST "http://127.0.0.1:18083/api/v1/policy-enforcer/validate" \
@@ -554,11 +586,11 @@ curl -sS -X POST "http://127.0.0.1:18083/api/v1/policy-enforcer/validate" \
 # expect "request_approved": true and all four stewards in valid_dataproviders
 ```
 
-Then run a normal `vflTrainModelRequest` end to end;
-`clientone/clienttwo/clientthree/server` must still receive composition
-requests. Note the requester **must** be
-`evangelos.pipilikas@student.uva.nl` — it is the only user with relations in
-`configuration/etcd_launch_files/agreements.json`.
+Then run a normal `vflTrainModelRequest` end to end with
+`bash scripts/single_request.sh` (VFL scenario S1); all four stewards must
+receive composition requests and training must run with 3 clients. The
+requester is `requestor` in every model and in `agreements.json`. Scenarios
+S2–S4 have their own scripts, listed in the VFL doc.
 
 ### Deploy / redeploy
 
@@ -579,45 +611,31 @@ binary is unreliable (`sharedRulesUpdate` and even `policyEnforcer-in` reported
 
 ## Next steps
 
-Goal: finish the port and prove the VFL workflow still works end to end.
-Test improvements are explicitly deferred.
+The port is functionally complete: policies can be changed through the
+orchestrator, and the VFL workflow passes S1–S3 against the eFLINT enforcer.
+What remains, in order:
 
-VFL target behaviour and scenarios are specified separately in
-[VFL_EFLINT_POLICY_SCENARIOS.md](VFL_EFLINT_POLICY_SCENARIOS.md).
-
-1. **Deploy step 4.** S3/O15/O16/O17 are implemented but **not deployed**.
-   `make orchestrator` + rollout, then re-run T3 and T4 — O15/O16/O17 all sit on
-   the `chooseArchetype` / `chooseThirdParty` path that T3 exercises.
-2. **Run T7 end to end** — the main goal, and scenario S1 of the VFL doc. The
-   policy enforcer already approves the VFL request (verified 2026-09-29); what
-   remains is driving a real `vflTrainModelRequest` through the api-gateway and
-   confirming all four stewards receive composition requests. Requester must be
-   `evangelos.pipilikas@student.uva.nl`.
-3. **VFL scenarios S2/S3** — see the VFL doc. Needs eFLINT models for the four
-   VFL stewards and a "server mandatory, ≥1 client" check.
-4. **Replace `policyRemoval` / `policyReintroduction`** — the api-gateway still
+1. **Run VFL scenario S4** (one client) — `scripts/vfl-scenario-s4-one-client.sh`.
+2. **Replace `policyRemoval` / `policyReintroduction`** — the api-gateway still
    sends these message types, which the eFLINT enforcer does not handle
    (`unknown message type`). They become
-   `PUT /api/v1/policyEnforcer/{steward}`, i.e. the endpoint step 3 delivered.
-5. **Step 4 remainder — O14.** `manage_jobs.go`: per-agent revocation,
-   `continue` instead of `return`, empty-routing-key guard. Entangled with the
-   VFL branches, so do it as a focused change *after* T7 gives a known-good
-   baseline to compare against.
-6. **G5** (`getJobAcrossAgents` returns an empty map) — it produced the spurious
+   `PUT /api/v1/policyEnforcer/{steward}`. Prerequisite for the dynamic
+   scenario S5.
+3. **Step 4 remainder — O14.** `manage_jobs.go`: per-agent revocation,
+   `continue` instead of `return`, empty-routing-key guard. Now that S1–S3
+   give a known-good baseline, it can be done as a focused change.
+4. **G5** (`getJobAcrossAgents` returns an empty map) — it produced the spurious
    `Jorrit` denials, and it must be understood before
    `POLICY_REVOCATION_DELETE_JOBS` is ever switched on. Likely related to the
    stale records in G3.
-7. **Step 5 — P3 cleanup.** Delete `go/cmd/policy-enforcer/go.mod`, `go.sum` and
+5. **Step 5 — P3 cleanup.** Delete `go/cmd/policy-enforcer/go.mod`, `go.sum` and
    the vendored `pkg/` copy (~7.5k lines). The Dockerfile already removes them
    at build time, so this is dead weight that will drift from `go/pkg`.
-8. **Deferred, not blocking:** unit tests for the step-4 logic (O15/O16/O17 have
+6. **Deferred, not blocking:** unit tests for the step-4 logic (O15/O16/O17 have
    no coverage), fixing the two order-flaky tests in `pkg/lib`, scripting
-   T1–T7, **G3** (stale job records), and **O4** (multipart upload — without it
-   `docs/VU_POLICY_CHANGE_QUICKCHECK.md` Option A does not work).
-5. **Optional, only if wanted:** O4, the `POST /policyEnforcer/eflintModels`
-   multipart upload. Without it, "Option A" in
-   `docs/VU_POLICY_CHANGE_QUICKCHECK.md` does not work; that doc should either
-   be updated to use the `PUT` flow or O4 should be ported.
+   T1–T6, **G3** (stale job records), and **O4** (multipart upload — without it
+   `docs/VU_POLICY_CHANGE_QUICKCHECK.md` Option A does not work; either port O4
+   or update that doc to the `PUT` flow).
 
 ---
 

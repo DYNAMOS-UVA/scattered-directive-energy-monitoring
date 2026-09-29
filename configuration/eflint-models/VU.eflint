@@ -30,11 +30,11 @@
 // Compute providers accepted by VU.
 +steward-supports-compute-provider("VU", "SURF").
 
-// ── Relation: Jorrit ────────────────────────────
-+has-relation("Jorrit", "VU").
-+relation-allows-request-type("Jorrit", "VU", "sqlDataRequest").
-+relation-allows-request-type("Jorrit", "VU", "genericRequest").
-+relation-allows-dataset("Jorrit", "VU", "wageGap").
-+relation-allows-archetype("Jorrit", "VU", "computeToData").
-+relation-allows-archetype("Jorrit", "VU", "dataThroughTtp").
-+relation-allows-compute-provider("Jorrit", "VU", "SURF").
+// ── Relation: requestor ────────────────────────────
++has-relation("requestor", "VU").
++relation-allows-request-type("requestor", "VU", "sqlDataRequest").
++relation-allows-request-type("requestor", "VU", "genericRequest").
++relation-allows-dataset("requestor", "VU", "wageGap").
++relation-allows-archetype("requestor", "VU", "computeToData").
++relation-allows-archetype("requestor", "VU", "dataThroughTtp").
++relation-allows-compute-provider("requestor", "VU", "SURF").

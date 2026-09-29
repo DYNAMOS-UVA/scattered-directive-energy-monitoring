@@ -45,3 +45,4 @@ fabric/fabric_config/ssh_config
 /.idea
 /run_dumps
 server_state.pth
+/configuration/eflint-models/backup-2026-09-29

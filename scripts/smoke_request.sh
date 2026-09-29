@@ -33,7 +33,7 @@ response=$(curl -fsS -X POST "$API_BASE_URL/requestApproval" \
       \"type\": \"vflTrainModelRequest\",
       \"user\": {
         \"id\": \"GUID\",
-        \"userName\": \"evangelos.pipilikas@student.uva.nl\"
+        \"userName\": \"requestor\"
       },
       \"dataProviders\": [\"clientone\", \"clienttwo\", \"clientthree\", \"server\"],
       \"data_request\": {

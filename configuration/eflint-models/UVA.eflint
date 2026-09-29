@@ -32,11 +32,11 @@
 // Compute providers accepted by UVA.
 +steward-supports-compute-provider("UVA", "SURF").
 
-// ── Relation: Jorrit ────────────────────────────
-+has-relation("Jorrit", "UVA").
-+relation-allows-request-type("Jorrit", "UVA", "sqlDataRequest").
-+relation-allows-request-type("Jorrit", "UVA", "genericRequest").
-+relation-allows-dataset("Jorrit", "UVA", "wageGap").
-+relation-allows-archetype("Jorrit", "UVA", "computeToData").
-+relation-allows-archetype("Jorrit", "UVA", "dataThroughTtp").
-+relation-allows-compute-provider("Jorrit", "UVA", "SURF").
+// ── Relation: requestor ────────────────────────────
++has-relation("requestor", "UVA").
++relation-allows-request-type("requestor", "UVA", "sqlDataRequest").
++relation-allows-request-type("requestor", "UVA", "genericRequest").
++relation-allows-dataset("requestor", "UVA", "wageGap").
++relation-allows-archetype("requestor", "UVA", "computeToData").
++relation-allows-archetype("requestor", "UVA", "dataThroughTtp").
++relation-allows-compute-provider("requestor", "UVA", "SURF").

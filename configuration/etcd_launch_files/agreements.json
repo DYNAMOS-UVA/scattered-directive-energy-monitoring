@@ -2,7 +2,7 @@
   {
     "name": "server",
     "relations": {
-      "evangelos.pipilikas@student.uva.nl": {
+      "requestor": {
         "ID": "GUID",
         "requestTypes": ["vflTrainModelRequest"],
         "allowedArchetypes": ["computeToData"],
@@ -15,7 +15,7 @@
   {
     "name": "clientone",
     "relations": {
-      "evangelos.pipilikas@student.uva.nl": {
+      "requestor": {
         "ID": "GUID",
         "requestTypes": ["vflTrainRequest"],
         "allowedArchetypes": ["computeToData"],
@@ -28,7 +28,7 @@
   {
     "name": "clienttwo",
     "relations": {
-      "evangelos.pipilikas@student.uva.nl": {
+      "requestor": {
         "ID": "GUID",
         "requestTypes": ["vflTrainRequest"],
         "allowedArchetypes": ["computeToData"],
@@ -41,7 +41,7 @@
   {
     "name": "clientthree",
     "relations": {
-      "evangelos.pipilikas@student.uva.nl": {
+      "requestor": {
         "ID": "GUID",
         "requestTypes": ["vflTrainRequest"],
         "allowedArchetypes": ["computeToData"],

@@ -24,7 +24,8 @@ Upstream clone used for diffing: `git clone https://github.com/DYNAMOS-UVA/DYNAM
 | 5 | P3 — drop vendored `cmd/policy-enforcer/pkg` + go.mod/go.sum | Not started |
 
 **VFL:** scenarios S1–S3 pass end to end with the eFLINT enforcer (2026-09-29);
-S4 scripted. See [VFL_EFLINT_POLICY_SCENARIOS.md](VFL_EFLINT_POLICY_SCENARIOS.md).
+S4 (one client) and S5 (server revoked mid-run, periodic policy check) are
+scripted. See [VFL_EFLINT_POLICY_SCENARIOS.md](VFL_EFLINT_POLICY_SCENARIOS.md).
 
 Open risks: **G5** (`getJobAcrossAgents` returns an empty map — causes spurious
 denials), **G3** (stale job records), **G6** (Linkerd cert rotation).
@@ -387,6 +388,13 @@ kubectl -n core exec "$ETCD_POD" -c etcd -- \
 
 Decision 2026-09-28: left alone for now.
 
+**Likely origin (2026-09-29).** Every VFL mid-run policy check re-runs the full
+approval path, and the orchestrator's `handleRequestApproval` composes the job
+again — a new job name registered under `/agents/jobs/<steward>/<user>/` — on
+each check. So a VFL run leaves roughly one job record per agent per check. The
+`policy_check_interval` parameter reduces the rate; a lighter check that skips
+re-composition would remove the source.
+
 ### G4 — Both services crash-loop on startup (pre-existing, benign)
 
 ```
@@ -615,23 +623,28 @@ The port is functionally complete: policies can be changed through the
 orchestrator, and the VFL workflow passes S1–S3 against the eFLINT enforcer.
 What remains, in order:
 
-1. **Run VFL scenario S4** (one client) — `scripts/vfl-scenario-s4-one-client.sh`.
-2. **Replace `policyRemoval` / `policyReintroduction`** — the api-gateway still
+1. **Run VFL scenarios S4 and S5** — `scripts/vfl-scenario-s4-one-client.sh`
+   and `scripts/vfl-scenario-s5-server-revoked-midrun.sh` (needs the
+   api-gateway redeployed with the periodic check).
+2. **Lighter VFL policy check** — re-check with the policy enforcer only,
+   without re-composing the job in the orchestrator. Cuts the per-check cost
+   and stops the job-record growth described under G3.
+3. **Replace `policyRemoval` / `policyReintroduction`** — the api-gateway still
    sends these message types, which the eFLINT enforcer does not handle
    (`unknown message type`). They become
    `PUT /api/v1/policyEnforcer/{steward}`. Prerequisite for the dynamic
-   scenario S5.
-3. **Step 4 remainder — O14.** `manage_jobs.go`: per-agent revocation,
+   client scenario S6.
+4. **Step 4 remainder — O14.** `manage_jobs.go`: per-agent revocation,
    `continue` instead of `return`, empty-routing-key guard. Now that S1–S3
    give a known-good baseline, it can be done as a focused change.
-4. **G5** (`getJobAcrossAgents` returns an empty map) — it produced the spurious
+5. **G5** (`getJobAcrossAgents` returns an empty map) — it produced the spurious
    `Jorrit` denials, and it must be understood before
    `POLICY_REVOCATION_DELETE_JOBS` is ever switched on. Likely related to the
    stale records in G3.
-5. **Step 5 — P3 cleanup.** Delete `go/cmd/policy-enforcer/go.mod`, `go.sum` and
+6. **Step 5 — P3 cleanup.** Delete `go/cmd/policy-enforcer/go.mod`, `go.sum` and
    the vendored `pkg/` copy (~7.5k lines). The Dockerfile already removes them
    at build time, so this is dead weight that will drift from `go/pkg`.
-6. **Deferred, not blocking:** unit tests for the step-4 logic (O15/O16/O17 have
+7. **Deferred, not blocking:** unit tests for the step-4 logic (O15/O16/O17 have
    no coverage), fixing the two order-flaky tests in `pkg/lib`, scripting
    T1–T6, **G3** (stale job records), and **O4** (multipart upload — without it
    `docs/VU_POLICY_CHANGE_QUICKCHECK.md` Option A does not work; either port O4

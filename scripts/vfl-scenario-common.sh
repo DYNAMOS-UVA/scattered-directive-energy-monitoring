@@ -16,6 +16,7 @@ API_PORT="${API_PORT:-8080}"
 ORCH_PORT="${ORCH_PORT:-18082}"
 PE_PORT="${PE_PORT:-18083}"
 CYCLES="${CYCLES:-5}"
+POLICY_CHECK_INTERVAL="${POLICY_CHECK_INTERVAL:-1}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-5}"
 MAX_POLLS="${MAX_POLLS:-120}"
 
@@ -112,13 +113,13 @@ print("valid:  ", sorted((d.get("valid_dataproviders") or {}).keys()))
 print("invalid:", sorted(d.get("invalid_dataproviders") or []))'
 }
 
-# run_vfl_request — submits a vflTrainModelRequest, polls until done/failed and
-# writes the final status JSON to $FINAL_STATUS_FILE.
+# submit_vfl_request — submits a vflTrainModelRequest and sets REQUEST_ID.
 FINAL_STATUS_FILE="/tmp/vfl-scenario-final-status.json"
+REQUEST_ID=""
 
-run_vfl_request() {
-    log "Submitting vflTrainModelRequest (cycles=${CYCLES})"
-    local response request_id status_response status poll
+submit_vfl_request() {
+    log "Submitting vflTrainModelRequest (cycles=${CYCLES}, policy_check_interval=${POLICY_CHECK_INTERVAL})"
+    local response
 
     response=$(curl -sS -X POST "${API_BASE_URL}/requestApproval" \
         -H "Host: api-gateway.api-gateway.svc.cluster.local" \
@@ -132,6 +133,7 @@ run_vfl_request() {
                 \"data\": {
                     \"learning_rate\": 0.1,
                     \"cycles\": ${CYCLES},
+                    \"policy_check_interval\": ${POLICY_CHECK_INTERVAL},
                     \"policy_removal\": -1,
                     \"policy_reintroduction\": -1,
                     \"training_backtrack\": 0,
@@ -143,20 +145,37 @@ run_vfl_request() {
         }")
     echo "Response: ${response}"
 
-    request_id=$(python3 -c 'import json, sys
+    REQUEST_ID=$(python3 -c 'import json, sys
 d = json.load(sys.stdin)
 print(d.get("request_id") or "")' <<< "$response")
-    [ -n "$request_id" ] || fail "no request_id in response (is another job still active?)"
+    [ -n "$REQUEST_ID" ] || fail "no request_id in response (is another job still active?)"
+}
 
-    for (( poll=1; poll<=MAX_POLLS; poll++ )); do
-        status_response=$(curl -sS "${API_BASE_URL}/getTrainingStatus?id=${request_id}" \
-            -H "Host: api-gateway.api-gateway.svc.cluster.local")
-        status=$(python3 -c 'import json, sys
+# fetch_status — prints the current status JSON for REQUEST_ID.
+fetch_status() {
+    curl -sS "${API_BASE_URL}/getTrainingStatus?id=${REQUEST_ID}" \
+        -H "Host: api-gateway.api-gateway.svc.cluster.local"
+}
+
+# json_field <json> <status|rounds> — extracts a field from a status JSON string.
+json_field() {
+    python3 -c 'import json, sys
 try:
-    print(json.load(sys.stdin).get("status", ""))
+    d = json.loads(sys.argv[1])
 except json.JSONDecodeError:
-    print("")' <<< "$status_response")
-        echo "[${poll}/${MAX_POLLS}] status=${status}"
+    print("")
+    raise SystemExit
+print(d.get("status", "") if sys.argv[2] == "status" else len(d.get("results") or []))' "$1" "$2"
+}
+
+# wait_for_vfl_request — polls until done/failed and writes the final status
+# JSON to $FINAL_STATUS_FILE.
+wait_for_vfl_request() {
+    local status_response status poll
+    for (( poll=1; poll<=MAX_POLLS; poll++ )); do
+        status_response=$(fetch_status)
+        status=$(json_field "$status_response" status)
+        echo "[${poll}/${MAX_POLLS}] status=${status} rounds=$(json_field "$status_response" rounds)"
 
         if [ "$status" = "done" ] || [ "$status" = "failed" ]; then
             echo "$status_response" > "$FINAL_STATUS_FILE"
@@ -164,7 +183,12 @@ except json.JSONDecodeError:
         fi
         sleep "$POLL_INTERVAL_SECONDS"
     done
-    fail "timed out waiting for request ${request_id}"
+    fail "timed out waiting for request ${REQUEST_ID}"
+}
+
+run_vfl_request() {
+    submit_vfl_request
+    wait_for_vfl_request
 }
 
 # summarize_result — prints status, rounds run and clients per round.
@@ -175,7 +199,11 @@ d = json.load(open(sys.argv[1]))
 results = d.get("results") or []
 print("status:          ", d.get("status"))
 print("rounds completed:", len(results))
-print("clients per round:", [r.get("clients") for r in results])' "$FINAL_STATUS_FILE"
+print("clients per round:", [r.get("clients") for r in results])
+meta = d.get("metadata") or {}
+if "stop_reason" in meta:
+    print("stop_reason:     ", meta.get("stop_reason"))
+    print("stopped before round:", meta.get("stopped_before_round"))' "$FINAL_STATUS_FILE"
 }
 
 final_field() {
@@ -188,5 +216,7 @@ if field == "status":
 elif field == "rounds":
     print(len(results))
 elif field == "client_counts":
-    print(" ".join(sorted({str(r.get("clients")) for r in results})))' "$FINAL_STATUS_FILE" "$1"
+    print(" ".join(sorted({str(r.get("clients")) for r in results})))
+elif field == "stop_reason":
+    print((d.get("metadata") or {}).get("stop_reason", ""))' "$FINAL_STATUS_FILE" "$1"
 }

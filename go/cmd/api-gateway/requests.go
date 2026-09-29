@@ -435,6 +435,43 @@ func rejectTrainingRequest(requestID string) {
 	activeJobLock.Unlock()
 }
 
+// reverifyVFLPolicy asks the policy enforcer whether a running VFL job may
+// continue. Each call re-runs the full approval path, including a new job
+// composition in the orchestrator, which is why checks are spaced out.
+func reverifyVFLPolicy(ctx context.Context, user *pb.User, dataProviders []string) (*pb.RequestApprovalResponse, error) {
+	protoRequest := &pb.RequestApproval{
+		Type:             "vflTrainModelRequest",
+		User:             user,
+		DataProviders:    dataProviders,
+		DestinationQueue: "policyEnforcer-in",
+	}
+
+	responseChan := make(chan validation)
+
+	requestApprovalMutex.Lock()
+	requestApprovalMap[protoRequest.User.Id] = responseChan
+	requestApprovalMutex.Unlock()
+
+	var err error
+	for range 5 {
+		if _, err = c.SendRequestApproval(ctx, protoRequest); err == nil {
+			break
+		}
+		logger.Sugar().Warnf("error in sending/receiving requestApproval: %v", err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("no reverification approval received: %w", err)
+	}
+
+	msg := (<-responseChan).response
+	logger.Sugar().Info("Received validation message: ", msg)
+
+	if msg.Type != "requestApprovalResponse" {
+		return nil, fmt.Errorf("unexpected message type %q", msg.Type)
+	}
+	return msg, nil
+}
+
 func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]string, jobId string, ctx context.Context, requestID string) []byte {
 	clients := map[string]string{}
 	var serverUrl string
@@ -446,6 +483,8 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	var learning_rate float64 = 0.05
 	var policy_removal int64 = -1
 	var policy_reintroduction int64 = -1
+	// Rounds between mid-run policy checks; 0 disables them (only the initial check runs).
+	var policyCheckInterval int64 = 1
 	var dataProviders []string = []string{}
 
 	var trainingBacktrack int64 = 0 // Default value
@@ -482,7 +521,11 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 			policy_reintroduction = int64(reintroducePolicies)
 		}
 
-		logger.Sugar().Debug("policy_removal round: ", policy_removal, ", policy_reintroduction round: ", policy_reintroduction)
+		if interval, ok := data["policy_check_interval"].(float64); ok && interval >= 0 {
+			policyCheckInterval = int64(interval)
+		}
+
+		logger.Sugar().Debug("policy_removal round: ", policy_removal, ", policy_reintroduction round: ", policy_reintroduction, ", policy_check_interval: ", policyCheckInterval)
 	}
 
 	metadata := map[string]any{
@@ -490,6 +533,7 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		"policy_removal":        policy_removal,
 		"training_backtrack":    trainingBacktrack,
 		"policy_reintroduction": policy_reintroduction,
+		"policy_check_interval": policyCheckInterval,
 	}
 
 	// logger.Sugar().Debug("metadata: ", metadata)
@@ -613,116 +657,72 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 			}
 		}
 
-		protoRequest := &pb.RequestApproval{
-			Type:             "vflTrainModelRequest",
-			User:             user,
-			DataProviders:    dataProviders,
-			DestinationQueue: "policyEnforcer-in",
-		}
+		// The initial approval already covered round 0, so checks run after every
+		// policyCheckInterval completed rounds.
+		if policyCheckInterval > 0 && round > 0 && round%policyCheckInterval == 0 {
+			logger.Sugar().Infof("- Policy check before round %d (every %d rounds)", round, policyCheckInterval)
 
-		// Create a channel to receive the response
-		responseChan := make(chan validation)
-
-		requestApprovalMutex.Lock()
-		requestApprovalMap[protoRequest.User.Id] = responseChan
-		requestApprovalMutex.Unlock()
-
-		noValidation := false
-
-		logger.Sugar().Info("- Sending policy reverification request")
-		for i := range 5 {
-			_, err = c.SendRequestApproval(ctx, protoRequest)
+			msg, err := reverifyVFLPolicy(ctx, user, dataProviders)
 			if err != nil {
-				logger.Sugar().Warnf("error in sending/receiving requestApproval: %v", err)
-			}
-
-			if err == nil {
-				// on success we can continue
+				logger.Sugar().Errorf("Policy check failed, shutting down operation: %v", err)
+				metadata["stop_reason"] = err.Error()
+				metadata["stopped_before_round"] = round
+				trainingFailed = true
 				break
-			}
-
-			if i == 4 {
-				noValidation = true
-			}
-		}
-
-		if noValidation {
-			logger.Sugar().Error("No reverification approval received, error in network. Shutting down operation.")
-			trainingFailed = true
-			break
-		}
-
-		select {
-		case validationStruct := <-responseChan:
-			msg := validationStruct.response
-			logger.Sugar().Info("Received validation message: ", msg, ", with vstruct: ", validationStruct)
-
-			if msg.Type != "requestApprovalResponse" {
-				logger.Sugar().Errorf("Unexpected message received, type: %s", msg.Type)
-				return []byte{}
 			}
 
 			if msg.Error != "" {
 				logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 				logger.Sugar().Info("   Policy does not allow this training to continue.")
 				logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+				metadata["stop_reason"] = "policy denied: " + msg.Error
+				metadata["stopped_before_round"] = round
 				trainingFailed = true
 				break
 			}
-
-			// logger.Sugar().Debug("AuthorizedProviders from policy response: ", msg.AuthorizedProviders)
-			// logger.Sugar().Debug("AuthorizedProviders originally requested: ", authorizedProviders)
-			// logger.Sugar().Debug("Current clients before sync: ", clients)
-			if len(msg.AuthorizedProviders) != len(authorizedProviders) {
-
-				// if len is different I can still allow training to continue with the authorised ones
-				// in that case remove the unauthorised ones from the clients map
-				// or add the authorised ones if they were not present before
-				for auth_provider := range authorizedProviders {
-					if _, ok := msg.AuthorizedProviders[auth_provider]; !ok {
-						logger.Sugar().Debug("Removing unauthorised provider: ", auth_provider, " from the training.")
-						delete(clients, auth_provider)
-					}
-				}
-			}
-
-			// maybe we can merge the above if into this one
-			if len(clients) != len(authorizedProviders) {
-				// add newly authorised clients that are not yet in the clients map
-				for auth_provider, url := range authorizedProviders {
-					if strings.ToLower(auth_provider) != "server" { // exclude server
-						if _, ok := msg.AuthorizedProviders[auth_provider]; ok {
-							if _, exists := clients[auth_provider]; !exists {
-								logger.Sugar().Debug("Adding newly authorised provider: ", auth_provider, " to the training.")
-								clients[auth_provider] = url
-							}
-						}
-					}
-				}
-			}
-
-			logger.Sugar().Debug("Clients: ", clients)
-			numClients = len(clients)
 
 			if admitted, reason := vflPolicyAdmits(msg.AuthorizedProviders); !admitted {
 				logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-				logger.Sugar().Infof("   Stopping training at round %d: %s", round, reason)
+				logger.Sugar().Infof("   Stopping training before round %d: %s", round, reason)
 				logger.Sugar().Info("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+				metadata["stop_reason"] = reason
+				metadata["stopped_before_round"] = round
 				trainingFailed = true
 				break
 			}
 
-			logger.Sugar().Info("- Sending training request")
-			accuracy, err := runVFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate, trainingBacktrack)
-			logger.Sugar().Info("- Intermediate accuracy achieved: ", accuracy, " for round ", round)
-			finalAccuracy = accuracy
-			metadata_accuracy = accuracy // store accuracy from metadata for results
-
-			if err != nil {
-				logger.Sugar().Error("Training round returned an error.")
-				trainingFailed = true
-				break
+			// Drop clients that lost authorisation, re-add ones that regained it.
+			for auth_provider := range authorizedProviders {
+				if _, ok := msg.AuthorizedProviders[auth_provider]; !ok {
+					logger.Sugar().Debug("Removing unauthorised provider: ", auth_provider, " from the training.")
+					delete(clients, auth_provider)
+				}
 			}
+			for auth_provider, url := range authorizedProviders {
+				if strings.ToLower(auth_provider) == "server" {
+					continue
+				}
+				if _, ok := msg.AuthorizedProviders[auth_provider]; ok {
+					if _, exists := clients[auth_provider]; !exists {
+						logger.Sugar().Debug("Adding newly authorised provider: ", auth_provider, " to the training.")
+						clients[auth_provider] = url
+					}
+				}
+			}
+		}
+
+		logger.Sugar().Debug("Clients: ", clients)
+		numClients = len(clients)
+
+		logger.Sugar().Info("- Sending training request")
+		accuracy, err := runVFLTrainingRound(dataRequest, clients, serverAuth, serverUrl, learning_rate, trainingBacktrack)
+		logger.Sugar().Info("- Intermediate accuracy achieved: ", accuracy, " for round ", round)
+		finalAccuracy = accuracy
+		metadata_accuracy = accuracy // store accuracy from metadata for results
+
+		if err != nil {
+			logger.Sugar().Error("Training round returned an error.")
+			trainingFailed = true
 		}
 
 		result := map[string]any{

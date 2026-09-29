@@ -27,10 +27,35 @@ model, in `agreements.json` and in the example request scripts.
 | # | When | Purpose |
 |---|---|---|
 | **C1** | Before the job is composed | Is the VFL request admissible at all? |
-| **C2** | After **each training round** | Is continuing still permitted, and with which clients? |
+| **C2** | After every `policy_check_interval` completed rounds | Is continuing still permitted, and with which clients? |
 
-C2's granularity is provisional — per-round checks can be slow, so this may
-later move to every *n* rounds or to an event-driven trigger.
+### Periodic check interval (C2)
+
+Set per request in `data_request.data`, next to `cycles`:
+
+```json
+"data": { "cycles": 10, "policy_check_interval": 3, ... }
+```
+
+| Value | Behaviour |
+|---|---|
+| `1` (default) | check before every round from round 1 on |
+| `N` | check before rounds `N, 2N, 3N, ...` — i.e. after every N completed rounds |
+| `0` | no mid-run checks; only C1 |
+
+Round 0 is never re-checked, since C1 just ran. The interval is recorded in the
+run's `metadata.policy_check_interval`, so experiment results show which
+setting produced them. A policy change therefore takes effect at most
+`policy_check_interval` rounds after it lands.
+
+**Why checks are expensive.** A C2 check re-runs the full approval path:
+api-gateway → policy enforcer → orchestrator `handleRequestApproval`, which
+composes the job again — a new job name plus a composition request to every
+agent — on each check. The interval divides that cost. A lighter check that
+only asks the policy enforcer (no re-composition) would be the structural fix.
+
+When a check stops the run, the status is `failed` and `metadata` carries
+`stop_reason` and `stopped_before_round`.
 
 ---
 
@@ -86,22 +111,32 @@ this).
 "≥ 1 client"; VFL runs with a single client and the server model shrinks to
 `1 × intermediate_neurons`.
 
+### S5 — Server permission revoked mid-run
+
+**Policy:** starts as S1. After a few completed rounds the requestor's relation
+at `server` is revoked (via `PUT /api/v1/policyEnforcer/server`).
+
+**Expected:** the next scheduled C2 check fails the "server mandatory" rule and
+the **whole run stops** — status `failed`, `metadata.stop_reason` set, and at
+most `policy_check_interval` further rounds after the revocation.
+
 ### Summary
 
 | Scenario | server | clients permitted | C1 | Training | Script | Result |
 |---|---|---|---|---|---|---|
-| S1 | yes | 3 | admit | 3 clients | `single_request.sh` | **pass** 2026-09-29 |
+| S1 | yes | 3 | admit | 3 clients | `vfl-scenario-s1-full.sh` | **pass** 2026-09-29 (via `single_request.sh`) |
 | S2 | **no** | any | **reject** | does not start | `vfl-scenario-s2-server-denied.sh` | **pass** 2026-09-29 |
 | S3 | yes | 2 | admit | 2 clients | `vfl-scenario-s3-two-clients.sh` | **pass** 2026-09-29 |
 | S4 | yes | 1 | admit | 1 client | `vfl-scenario-s4-one-client.sh` | not yet run |
+| S5 | yes → **no** mid-run | 3 | admit | stops at next C2 | `vfl-scenario-s5-server-revoked-midrun.sh` | not yet run |
 
-### Future — S5, dynamic policy change mid-run
+### Future — S6, client exclusion/reintroduction mid-run
 
-A policy change lands *while* training is running; at the next C2 the client set
-changes and the VFL training configuration adapts in real time (client dropped
-or reintroduced, server architecture resized, optionally backtracking to a saved
-checkpoint). Not in scope yet, but S1–S4 are deliberately shaped so that S5 is
-just "S1 → S3 → S1 without restarting".
+A client's permission changes *while* training is running; at the next C2 the
+client set changes and the VFL training configuration adapts in real time
+(client dropped or reintroduced, server architecture resized, optionally
+backtracking to a saved checkpoint). Not in scope yet; S5 already exercises the
+mid-run revocation path, so S6 is "S1 → S3 → S1 without restarting".
 
 ---
 
@@ -110,14 +145,14 @@ just "S1 → S3 → S1 without restarting".
 Most of the machinery is in place. In
 `go/cmd/api-gateway/requests.go`, `runVFLTraining`:
 
-- **C2 is already implemented.** Every round sends a
+- **C2 is implemented** (`reverifyVFLPolicy`), running every
+  `policy_check_interval` rounds (§2). It sends a
   `pb.RequestApproval{Type: "vflTrainModelRequest", DataProviders: …}` to
   `policyEnforcer-in` and blocks on the response channel.
-- **Denial already stops training:** if `msg.Error != ""` it logs
-  *"Policy does not allow this training to continue"* and breaks the loop.
-- **Client exclusion is already policy-driven:** when
-  `len(msg.AuthorizedProviders) != len(authorizedProviders)`, providers missing
-  from the response are deleted from the `clients` map.
+- **Denial stops training:** a policy error or a failed "server mandatory,
+  ≥1 client" rule records a `stop_reason` and ends the run.
+- **Client exclusion is already policy-driven:** providers missing from the
+  response are deleted from the `clients` map.
 - **The server model already adapts** to a changing client count —
   `update_server_model_architecture` / `shrink_server_model` /
   `expand_server_model` in `python/vfl-train-model-demo/main.py`.
@@ -182,7 +217,7 @@ long-term home.
 
 On closer reading, the C2 handler does both: it deletes providers missing from
 the response, then re-adds any authorised non-server provider that is not in
-`clients`. S5 needs no new code for this; it still needs testing.
+`clients`. S6 needs no new code for this; it still needs testing.
 
 ### 6.4 eFLINT models for the VFL stewards — **done 2026-09-29**
 
@@ -201,20 +236,28 @@ S1 was confirmed with `scripts/single_request.sh` on 2026-09-29; S2 and S3 with
 the scripts below on the same day.
 
 ```bash
+bash scripts/vfl-scenario-s1-full.sh                         # normal run
+POLICY_CHECK_INTERVAL=3 CYCLES=10 bash scripts/vfl-scenario-s1-full.sh
 bash scripts/vfl-scenario-s2-server-denied.sh
 bash scripts/vfl-scenario-s3-two-clients.sh                  # drops clientthree
 DROPPED_CLIENT=clientone bash scripts/vfl-scenario-s3-two-clients.sh
 bash scripts/vfl-scenario-s4-one-client.sh                   # keeps clientone
 KEPT_CLIENT=clienttwo bash scripts/vfl-scenario-s4-one-client.sh
+bash scripts/vfl-scenario-s5-server-revoked-midrun.sh        # revoke after 3 rounds
+POLICY_CHECK_INTERVAL=3 CYCLES=15 REVOKE_AFTER_ROUNDS=4 \
+  bash scripts/vfl-scenario-s5-server-revoked-midrun.sh
 ```
 
 Each script revokes the requestor through
 `PUT /api/v1/policyEnforcer/{steward}` (the real update path), prints the
 policy enforcer's verdict, runs a `vflTrainModelRequest`, checks the outcome
-(S2: `failed` with 0 rounds; S3/S4: `done` with 2/1 clients every round) and
+(S1: `done` with 3 clients; S2: `failed` with 0 rounds; S3/S4: `done` with 2/1
+clients every round; S5: `failed` with a `stop_reason`, within
+`policy_check_interval` rounds of the revocation) and
 **always restores the original policy on exit**. The repo's `.eflint` files are
 never modified — only the live copy in etcd. Shared logic lives in
-`scripts/vfl-scenario-common.sh`. `CYCLES` defaults to 5.
+`scripts/vfl-scenario-common.sh`. `CYCLES` defaults to 5 (10 for S5) and
+`POLICY_CHECK_INTERVAL` to 1.
 
 If a script is killed without running its exit handler (e.g. `kill -9`), etcd
 keeps the revoked policy; restore it with `GET /api/v1/updateEtc`.
@@ -223,16 +266,21 @@ keeps the revoked policy; restore it with `GET /api/v1/updateEtc`.
 
 ## 7. Suggested order of work
 
-Steps 1–4 are **done** (2026-09-29); S4 is scripted and awaiting its first run.
+Steps 1–5 are **done** (2026-09-29); S4 and S5 are scripted and awaiting their
+first run.
 
 1. ~~**Baseline** — S1 with the new enforcer.~~ Done.
 2. ~~**eFLINT models for `server` + the three clients** (§6.4).~~ Done.
 3. ~~**Server-mandatory check** (§6.2).~~ Done.
 4. ~~**S2/S3 by live policy change** through
    `PUT /api/v1/policyEnforcer/{steward}`.~~ Done, scripted.
-5. **Replace `policyRemoval`/`policyReintroduction`** (§6.1) with that PUT, so
+5. ~~**Periodic C2 check with stoppage** (`policy_check_interval`, §2), S5.~~
+   Done, scripted.
+6. **Lighter C2 check** — ask the policy enforcer only, without re-composing
+   the job in the orchestrator (§2, "Why checks are expensive").
+7. **Replace `policyRemoval`/`policyReintroduction`** (§6.1) with that PUT, so
    mid-run changes are triggered from the training loop.
-6. **S5** — dynamic mid-run change.
+8. **S6** — client exclusion/reintroduction mid-run.
 
-None of steps 1–4 needed new orchestrator code beyond the port itself; the only
-code change was the api-gateway admission check.
+The only code changes for steps 1–5 were in the api-gateway (admission check,
+periodic check); the orchestrator needed nothing beyond the port itself.

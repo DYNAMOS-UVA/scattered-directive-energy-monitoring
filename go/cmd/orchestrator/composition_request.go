@@ -20,6 +20,14 @@ func (e *UnauthorizedProviderError) Error() string {
 	return fmt.Sprintf("third party '%s' is not online", e.ProviderName)
 }
 
+// archetypesForLog returns the archetypes slice for logging; nil-safe.
+func archetypesForLog(a *pb.UserAllowedArchetypes) []string {
+	if a == nil {
+		return nil
+	}
+	return a.Archetypes
+}
+
 func startCompositionRequest(ctx context.Context, validationResponse *pb.ValidationResponse, authorizedProviders map[string]lib.AgentDetails, compositionRequest *pb.CompositionRequest, redeploy bool) (map[string]string, context.Context, error) {
 	logger.Debug("Entering startCompositionRequest")
 
@@ -165,8 +173,7 @@ func pickArchetypeBasedOnWeight() (*api.Archetype, error) {
 	return lightest, nil
 }
 
-func getArchetypeBasedOnOptions(validationResponse *pb.ValidationResponse, authorizedDataProviders map[string]lib.AgentDetails) string {
-	logger.Sugar().Debugf("Start getArchetypeBasedOnOptions, options: %v", validationResponse.Options)
+func getArchetypeBasedOnOptions(validationResponse *pb.ValidationResponse, authorizedDataProviders map[string]lib.AgentDetails) string {	logger.Sugar().Debugf("Start getArchetypeBasedOnOptions, options: %v", validationResponse.Options)
 
 	// This ranges over the options. And selects an archetype based on the options.
 	for option, value := range validationResponse.Options {
@@ -176,15 +183,32 @@ func getArchetypeBasedOnOptions(validationResponse *pb.ValidationResponse, autho
 			if value {
 				allowed := true
 				for provider := range authorizedDataProviders {
-					if !slices.Contains(validationResponse.ValidArchetypes.Archetypes[provider].Archetypes, "dataThroughTtp") {
-						logger.Sugar().Debugf("allowed false, slice: %v", validationResponse.ValidArchetypes.Archetypes[provider].Archetypes)
-
+					allowedArchetypes := validationResponse.ValidArchetypes.Archetypes[provider]
+					if allowedArchetypes == nil || !slices.Contains(allowedArchetypes.Archetypes, "dataThroughTtp") {
+						logger.Sugar().Debugf("dataThroughTtp not allowed for provider %s, slice: %v", provider, archetypesForLog(allowedArchetypes))
 						allowed = false
+						break
 					}
 				}
 
 				if allowed {
 					return "dataThroughTtp"
+				}
+			} else if len(authorizedDataProviders) > 1 {
+				// Without aggregation, dataThroughTtp would only carry one provider's
+				// data, so multiple providers force computeToData.
+				allowed := true
+				for provider := range authorizedDataProviders {
+					allowedArchetypes := validationResponse.ValidArchetypes.Archetypes[provider]
+					if allowedArchetypes == nil || !slices.Contains(allowedArchetypes.Archetypes, "computeToData") {
+						logger.Sugar().Debugf("computeToData not allowed for provider %s: %v", provider, archetypesForLog(allowedArchetypes))
+						allowed = false
+						break
+					}
+				}
+
+				if allowed {
+					return "computeToData"
 				}
 			}
 		}
@@ -199,14 +223,16 @@ func getArchetypeBasedOnOptions(validationResponse *pb.ValidationResponse, autho
 // THEN do weight checking
 func chooseArchetype(validationResponse *pb.ValidationResponse, authorizedDataProviders map[string]lib.AgentDetails) (string, error) {
 	logger.Sugar().Debug("starting chooseArchetype")
-	logger.Sugar().Debug(validationResponse)
+	if validationResponse.ValidArchetypes == nil || len(validationResponse.ValidArchetypes.Archetypes) == 0 {
+		return "", fmt.Errorf("validation response has no valid archetypes")
+	}
 	logger.Sugar().Debugf("length options: %v", len(validationResponse.Options))
 
 	for k := range validationResponse.ValidDataproviders {
 		logger.Sugar().Debug("validDataprovider: %s ", k)
 	}
 
-	if validationResponse.Options != nil && len(validationResponse.Options) > 0 {
+	if len(validationResponse.Options) > 0 {
 		archetype := getArchetypeBasedOnOptions(validationResponse, authorizedDataProviders)
 		if archetype != "" {
 			return archetype, nil
@@ -220,7 +246,8 @@ func chooseArchetype(validationResponse *pb.ValidationResponse, authorizedDataPr
 	}
 	allowed := true
 	for provider := range authorizedDataProviders {
-		if !slices.Contains(validationResponse.ValidArchetypes.Archetypes[provider].Archetypes, archeType.Name) {
+		allowedArchetypes := validationResponse.ValidArchetypes.Archetypes[provider]
+		if allowedArchetypes == nil || !slices.Contains(allowedArchetypes.Archetypes, archeType.Name) {
 			allowed = false
 		}
 	}
@@ -229,7 +256,11 @@ func chooseArchetype(validationResponse *pb.ValidationResponse, authorizedDataPr
 	}
 
 	for provider := range authorizedDataProviders {
-		someArchetype := validationResponse.ValidArchetypes.Archetypes[provider].Archetypes[0]
+		allowedArchetypes := validationResponse.ValidArchetypes.Archetypes[provider]
+		if allowedArchetypes == nil || len(allowedArchetypes.Archetypes) == 0 {
+			continue
+		}
+		someArchetype := allowedArchetypes.Archetypes[0]
 		if someArchetype != "" {
 			return someArchetype, nil
 		}
@@ -278,8 +309,14 @@ func chooseThirdParty(validationResponse *pb.ValidationResponse) (lib.AgentDetai
 
 	// Iterate over all valid dataproviders
 	for _, dataProvider := range validationResponse.ValidDataproviders {
-		// For each compute provider in a valid dataprovider
+		// Dedupe per provider: the reasoner may list a compute provider more than
+		// once, which would otherwise inflate its count past 1 per data provider.
+		seen := make(map[string]bool, len(dataProvider.ComputeProviders))
 		for _, computeProvider := range dataProvider.ComputeProviders {
+			if seen[computeProvider] {
+				continue
+			}
+			seen[computeProvider] = true
 			intersectionMap[computeProvider]++
 		}
 	}

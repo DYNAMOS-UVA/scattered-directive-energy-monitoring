@@ -28,7 +28,7 @@ func handleIncomingMessages(ctx context.Context, grpcMsg *pb.SideCarMessage) err
 		handleRequestApproval(ctx, validationResponse, false)
 
 	case "revalidationResponse":
-		// I think this is unused 
+		// I think this is unused
 		// validationResponse is the flow where a policy Enforcer approved or denied a request
 		validationResponse := &pb.ValidationResponse{}
 		if err := grpcMsg.Body.UnmarshalTo(validationResponse); err != nil {

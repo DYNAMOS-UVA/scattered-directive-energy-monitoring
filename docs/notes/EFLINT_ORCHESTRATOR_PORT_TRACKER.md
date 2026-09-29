@@ -19,12 +19,14 @@ Upstream clone used for diffing: `git clone https://github.com/DYNAMOS-UVA/DYNAM
 |---|---|---|
 | 1 | S5 + O11 + O8 + O9 — populate etcd from the PVC | **Done — deployed and verified 2026-09-28** |
 | 2 | S1 + O12 + O13 — `checkJobs` by steward name | **Done — verified in-cluster 2026-09-28** |
-| 3 | O5 + O6 + O2 + O1 + O3 (+ SC1–SC3) — policy update endpoint | **Done — verified (tests C, E2 outstanding)** |
-| 4 | S3, O15, O16, O17, O14 — correctness fixes | Partly done: O14's revocation path landed in step 2 (behind the G2 guard). S3, O15, O16, O17 and the rest of O14 outstanding. |
+| 3 | O5 + O6 + O2 + O1 + O3 (+ SC1–SC3) — policy update endpoint | **Done — fully verified 2026-09-29 (T3–T6)** |
+| 4 | S3, O15, O16, O17, O14 — correctness fixes | **Mostly done 2026-09-29.** S3, O15, O16, O17 implemented; O14's revocation path landed in step 2 behind the G2 guard. Remainder of O14 outstanding. Not yet deployed. |
 | 5 | P3 — drop vendored `cmd/policy-enforcer/pkg` + go.mod/go.sum | Not started |
 
-Open risks: **G1** (VFL denied by the eFLINT reasoner), **G3** (stale job
-records). **G2** mitigated (job deletion on revocation is opt-in). See
+Open risks: **G5** (`getJobAcrossAgents` returns an empty map — causes spurious
+denials), **G3** (stale job records), **G6** (Linkerd cert rotation).
+**G2** mitigated (job deletion on revocation is opt-in).
+**G1 retracted** — VFL *is* compatible with the eFLINT enforcer. See
 [Known gaps and risks](#known-gaps-and-risks).
 
 ---
@@ -183,7 +185,6 @@ Deviations from upstream, deliberate:
 not caused by these edits.)
 
 ### 2026-09-28 — 504 on the first live test: the sidecar was the missing piece
-
 `PUT /policyEnforcer/sharedRules` returned
 `504 Timeout waiting for Policy Enforcer validation`. That already proved the new
 orchestrator code was live (old code would have failed instantly in
@@ -217,6 +218,34 @@ functional probe (hit the endpoint and look at the status code).
 
 ---
 
+### 2026-09-29 — step 4 correctness fixes (S3, O15, O16, O17)
+
+- **S3** `pkg/lib/utils.go`: `GenerateJobName` no longer returns `""` for
+  usernames without `@`. It uses the local part when an `@` is present,
+  otherwise the whole string, then lowercases and hyphenates so the result is a
+  valid Kubernetes object name. Covered by a new `TestGenerateJobNamePrefix`.
+  Behaviour change: mixed-case local parts are now lowercased
+  (`Jake.Jongejans@…` → `jake-jongejans-…`), which K8s names require anyway.
+- **O15** `composition_request.go`: `getArchetypeBasedOnOptions` and
+  `chooseArchetype` are nil-safe on `ValidArchetypes.Archetypes[provider]`, and
+  `chooseArchetype` now errors when `ValidArchetypes` is nil/empty instead of
+  nil-panicking. Added the `archetypesForLog` helper.
+- **O16** `composition_request.go`: `chooseThirdParty` dedupes each provider's
+  `ComputeProviders` before counting, so repeated entries can no longer inflate
+  the intersection past one per data provider.
+- **O17** `composition_request.go`: with `aggregate:false` and more than one
+  authorized provider, `computeToData` is selected explicitly instead of
+  falling through to weight-based picking.
+
+`go build ./...` and `go vet ./cmd/orchestrator/ ./pkg/lib/` pass.
+
+Note: `go test ./pkg/lib/` reports two **pre-existing** failures,
+`TestGetNotMatchedElements` and `TestSliceIntersectAndDifference2`. Both pass in
+isolation and fail only in full-suite order — map-iteration-order flakes in set
+helpers, unrelated to this work.
+
+---
+
 ## 4. Sidecar (`go/cmd/sidecar`) — discovered 2026-09-28
 
 | # | Change | Verdict |
@@ -234,31 +263,42 @@ Note: the sidecar runs in **both** the orchestrator and policy-enforcer pods, so
 
 ## Known gaps and risks
 
-### G1 — VFL is not compatible with the eFLINT enforcer (blocks test T7)
+### G1 — ~~VFL is not compatible with the eFLINT enforcer~~ **RETRACTED 2026-09-29**
 
-`resolveProvider` in `policy-enforcer/service/validation_service.go` chooses only
-*how agreement phrases are obtained* (eFLINT text vs. legacy JSON). Its own
-comment is explicit: *"in either case the result feeds the same canonical
-layered execution path"*. **`legacy` is not a bypass** — legacy JSON agreements
-are translated into eFLINT phrases and run through the reasoner regardless.
+**This gap does not exist.** The original conclusion was wrong.
 
-For the VFL stewards (`clientone`, `clienttwo`, `clientthree`, `server`) that
-translation does not yield a holding `has-relation`, so the reasoner reports
-`permitted-at-steward did not hold` and every steward is marked invalid:
+Evidence it was based on: `steward marked invalid by reasoner
+{"steward":"clienttwo","reason":"permitted-at-steward did not hold"}` during the
+post-`sharedRules` re-evaluation burst. But those denials were for
+`jake.jongejans@student.uva.nl` and `Jorrit`, and
+`configuration/etcd_launch_files/agreements.json` defines relations **only** for
+`evangelos.pipilikas@student.uva.nl`. Denying users with no relation is correct
+behaviour, not a translation failure.
+
+Verified against the user who does have relations:
 
 ```
-steward marked invalid by reasoner {"steward":"clienttwo","reason":"permitted-at-steward did not hold"}
-Request validation completed {"approved":false,"validProviders":0,"invalidProviders":3}
+GET /api/v1/policy-enforcer/allowed-clauses?steward=clientone&requester=evangelos.pipilikas@student.uva.nl
+-> {"supported_archetypes":["computeToData"],"relations":[{"request_types":["vflTrainRequest"],...}]}
+
+POST /api/v1/policy-enforcer/validate
+  {"user":{"id":"1234","user_name":"evangelos.pipilikas@student.uva.nl"},
+   "data_providers":["clientone","clienttwo","clientthree","server"]}
+-> "request_approved": true
+   all four stewards in valid_dataproviders with computeToData
+   "invalid_dataproviders": []
 ```
 
-Consequences:
-- A fresh `vflTrainModelRequest` will be **denied** by the new enforcer.
-- Adding `legacy` entries to `provider_configs.json` will **not** fix it.
-- This is independent of the orchestrator port — it is a policy-enforcer /
-  policy-modelling gap that predates steps 1–3.
+So `resolveProvider`'s legacy path **does** translate the VFL JSON agreements
+into working eFLINT phrases (there is a `service/legacy_translator_test.go`
+covering it). T7 is **not blocked**.
 
-Fixing it means either writing eFLINT models for the VFL stewards, or making
-the legacy path a true bypass that skips the reasoner.
+The `Jorrit` denials in that same burst have a different cause — see G5:
+`agentsWithThisJob` was empty, so the `policyUpdate` carried zero data
+providers and was trivially denied.
+
+Lesson: do not infer a systemic incompatibility from denials without first
+checking whether the subject actually has a relation in the agreement.
 
 ### G2 — `checkAllJobs()` is a destructive thundering herd
 
@@ -336,6 +376,51 @@ enabling `POLICY_REVOCATION_DELETE_JOBS` would still be a partial no-op for
 these records. **Must be understood before that flag is ever switched on.**
 Not investigated.
 
+### G6 — Linkerd identity cert stops rotating, taking down the whole cluster
+
+Symptom: **every** meshed pod goes `CrashLoopBackOff` at once (`api-gateway`,
+`orchestrator`, `policy-enforcer`, `core`, agent namespaces), proxies logging:
+
+```
+Failed to obtain identity error=... invalid peer certificate: certificate expired
+WARN linkerd_app: Waiting for identity to be initialized...
+```
+
+Cause: Linkerd issues each meshed pod a **24-hour** workload certificate. If the
+`linkerd-identity` pod runs for days (and the host sleeps / the clock jumps), its
+*own* proxy certificate stops rotating and it serves an expired cert, so nobody
+can bootstrap an identity. The trust anchor and issuer certs are **not** the
+problem — check before regenerating anything:
+
+```bash
+kubectl -n linkerd get secret linkerd-identity-issuer -o jsonpath='{.data.crt\.pem}' \
+  | base64 -d | openssl x509 -noout -dates
+```
+
+Observed 2026-09-29: issuer valid until `Jun 18 2027`, but the expired peer cert
+belonged to the `linkerd-identity` pod (up since 2026-09-24).
+
+Fix — restart the control plane, **identity first**, then the workloads:
+
+```bash
+kubectl -n linkerd rollout restart deploy/linkerd-identity
+kubectl -n linkerd rollout status deploy/linkerd-identity
+kubectl -n linkerd rollout restart deploy/linkerd-destination deploy/linkerd-proxy-injector
+
+kubectl -n core rollout restart deploy;  kubectl -n core rollout restart statefulset
+kubectl -n core rollout restart daemonset
+kubectl -n orchestrator rollout restart deploy
+kubectl -n api-gateway rollout restart deploy
+for ns in clientone clienttwo clientthree server; do kubectl -n $ns rollout restart deploy; done
+```
+
+No data is lost (verified: 19 `/policyEnforcer/` keys and 37 job records intact).
+Transient `etcd` `MsgPreVote ... request timed out` messages during the restart
+are normal while `etcd-1`/`etcd-2` are still coming back.
+
+G4 amplifies this: `startConsuming` calls `Fatalf` when the sidecar's gRPC port
+is unreachable, so the DYNAMOS containers crash-loop instead of waiting.
+
 ---
 
 ## Test results
@@ -351,9 +436,9 @@ Not investigated.
 | T3 — `PUT /policyEnforcer/VU` | Pass. Commenting out `+steward-supports-archetype("VU","dataThroughTtp")` and PUTting made `allowed-clauses` return `supported_archetypes:["computeToData"]`; restoring the line returned `["dataThroughTtp","computeToData"]`. Policy changes now flow through the orchestrator end to end. |
 | O12 — `checkJobs` key walking | Pass. `checkJobs: agreement="VU" found 0 user(s) with active jobs` — correct, no `/agents/jobs/VU/...` keys exist. |
 | T4b — O13 + G2 guard | Pass. A `sharedRules` PUT fanned out across all stewards: **25** `leaving N job registration(s) untouched` warnings (matching the 25 `Jorrit` jobs under UVA), **0** `deleting all active jobs` lines, job count steady at **37**. Pre-guard, those 25 would all have hit `deleteJobAcrossAgents`. |
-| T5 — invalid eFLINT → `400` | Not yet run. |
-| T6 — `GET /policyEnforcer[/VU]` | Not yet run. |
-| T7 — VFL end to end | Blocked by G1. |
+| T5 — invalid eFLINT → `400` | **Pass (2026-09-29).** `400 Policy update rejected by Policy Enforcer`. |
+| T6 — `GET /policyEnforcer[/VU]` | **Pass (2026-09-29).** `200` with the legacy Agreement JSON for VU, read from the `/agreements/` sub-prefix — confirms O3. |
+| T7 — VFL end to end | **Unblocked.** Policy enforcer approves the VFL request (`request_approved: true`, all four stewards valid). Full end-to-end run still to be done. |
 
 ---
 
@@ -432,7 +517,7 @@ kubectl -n core exec "$ETCD_POD" -c etcd -- etcdctl --endpoints=http://127.0.0.1
 Expect: `untouched` > 0, `deleting all active` == **0**, job count == `$JOBS_BEFORE`.
 A non-zero deletion count means the G2 guard has regressed.
 
-### T5 — rejection path (O2) — *not yet run*
+### T5 — rejection path (O2)
 
 ```bash
 curl -i -X PUT "http://127.0.0.1:18082/api/v1/policyEnforcer/VU" \
@@ -446,7 +531,7 @@ Empty body expects `400 request body is empty`.
 Timeout path: `kubectl -n orchestrator scale deploy/policy-enforcer --replicas=0`,
 PUT, expect `504` after ~30 s, then scale back to 1.
 
-### T6 — GET regression (O3) — *not yet run*
+### T6 — GET regression (O3)
 
 ```bash
 curl -i "http://127.0.0.1:18082/api/v1/policyEnforcer/VU"
@@ -455,11 +540,25 @@ curl -i "http://127.0.0.1:18082/api/v1/policyEnforcer"
 
 Expect `200` with Agreement JSON, not `500`.
 
-### T7 — VFL regression — *blocked by G1*
+### T7 — VFL regression
 
-Run a normal `vflTrainModelRequest` end to end; `clientone/clienttwo/clientthree/server`
-must still receive composition requests. Currently expected to **fail** at the
-policy-enforcer, not in the orchestrator — see G1.
+First, confirm the enforcer approves the request (this passes as of 2026-09-29):
+
+```bash
+cat > /tmp/vfl.json <<'EOF'
+{"user":{"id":"1234","user_name":"evangelos.pipilikas@student.uva.nl"},
+ "data_providers":["clientone","clienttwo","clientthree","server"]}
+EOF
+curl -sS -X POST "http://127.0.0.1:18083/api/v1/policy-enforcer/validate" \
+  -H "Content-Type: application/json" --data-binary @/tmp/vfl.json
+# expect "request_approved": true and all four stewards in valid_dataproviders
+```
+
+Then run a normal `vflTrainModelRequest` end to end;
+`clientone/clienttwo/clientthree/server` must still receive composition
+requests. Note the requester **must** be
+`evangelos.pipilikas@student.uva.nl` — it is the only user with relations in
+`configuration/etcd_launch_files/agreements.json`.
 
 ### Deploy / redeploy
 
@@ -480,31 +579,41 @@ binary is unreliable (`sharedRulesUpdate` and even `policyEnforcer-in` reported
 
 ## Next steps
 
-1. **Finish step 3 verification** — run T5 and T6. Both are VU-only, so G1 does
-   not block them.
-2. **Step 4 — correctness fixes.** Small, self-contained, no new infrastructure:
-   - **S3** `pkg/lib/utils.go`: `GenerateJobName` currently returns `""` for any
-     username without `@`, so `"Jorrit"` yields a broken job name. Needed as
-     soon as requests are driven with eFLINT-style usernames.
-   - **O15** `composition_request.go`: nil-safety on
-     `ValidArchetypes.Archetypes[provider]` — the reasoner legitimately returns
-     providers with no archetype entry, which nil-panics today.
-   - **O16** `composition_request.go`: dedupe compute providers in
-     `chooseThirdParty` — the reasoner emits repeats, inflating the intersection.
-   - **O17** `composition_request.go`: enforce `computeToData` when
-     `aggregate:false` and more than one provider.
-   - **O14 (remainder)** `manage_jobs.go`: per-agent revocation, `continue`
-     instead of `return`, empty-routing-key guard.
-3. **Step 5 — P3 cleanup.** Delete `go/cmd/policy-enforcer/go.mod`, `go.sum` and
+Goal: finish the port and prove the VFL workflow still works end to end.
+Test improvements are explicitly deferred.
+
+VFL target behaviour and scenarios are specified separately in
+[VFL_EFLINT_POLICY_SCENARIOS.md](VFL_EFLINT_POLICY_SCENARIOS.md).
+
+1. **Deploy step 4.** S3/O15/O16/O17 are implemented but **not deployed**.
+   `make orchestrator` + rollout, then re-run T3 and T4 — O15/O16/O17 all sit on
+   the `chooseArchetype` / `chooseThirdParty` path that T3 exercises.
+2. **Run T7 end to end** — the main goal, and scenario S1 of the VFL doc. The
+   policy enforcer already approves the VFL request (verified 2026-09-29); what
+   remains is driving a real `vflTrainModelRequest` through the api-gateway and
+   confirming all four stewards receive composition requests. Requester must be
+   `evangelos.pipilikas@student.uva.nl`.
+3. **VFL scenarios S2/S3** — see the VFL doc. Needs eFLINT models for the four
+   VFL stewards and a "server mandatory, ≥1 client" check.
+4. **Replace `policyRemoval` / `policyReintroduction`** — the api-gateway still
+   sends these message types, which the eFLINT enforcer does not handle
+   (`unknown message type`). They become
+   `PUT /api/v1/policyEnforcer/{steward}`, i.e. the endpoint step 3 delivered.
+5. **Step 4 remainder — O14.** `manage_jobs.go`: per-agent revocation,
+   `continue` instead of `return`, empty-routing-key guard. Entangled with the
+   VFL branches, so do it as a focused change *after* T7 gives a known-good
+   baseline to compare against.
+6. **G5** (`getJobAcrossAgents` returns an empty map) — it produced the spurious
+   `Jorrit` denials, and it must be understood before
+   `POLICY_REVOCATION_DELETE_JOBS` is ever switched on. Likely related to the
+   stale records in G3.
+7. **Step 5 — P3 cleanup.** Delete `go/cmd/policy-enforcer/go.mod`, `go.sum` and
    the vendored `pkg/` copy (~7.5k lines). The Dockerfile already removes them
    at build time, so this is dead weight that will drift from `go/pkg`.
-4. **Then the gaps, in priority order:**
-   - **G1** (VFL vs the eFLINT reasoner) — the only one that blocks real use of
-     this fork. Needs either eFLINT models for the VFL stewards or a genuine
-     legacy bypass that skips the reasoner. Deliberately deferred 2026-09-28.
-   - **G5** (`getJobAcrossAgents` returns an empty map) — must be understood
-     before `POLICY_REVOCATION_DELETE_JOBS` is ever switched on.
-   - **G3** (stale job records) — cosmetic until then.
+8. **Deferred, not blocking:** unit tests for the step-4 logic (O15/O16/O17 have
+   no coverage), fixing the two order-flaky tests in `pkg/lib`, scripting
+   T1–T7, **G3** (stale job records), and **O4** (multipart upload — without it
+   `docs/VU_POLICY_CHANGE_QUICKCHECK.md` Option A does not work).
 5. **Optional, only if wanted:** O4, the `POST /policyEnforcer/eflintModels`
    multipart upload. Without it, "Option A" in
    `docs/VU_POLICY_CHANGE_QUICKCHECK.md` does not work; that doc should either

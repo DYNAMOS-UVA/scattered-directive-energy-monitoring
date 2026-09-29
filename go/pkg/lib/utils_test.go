@@ -9,6 +9,27 @@ import (
 	"gotest.tools/assert"
 )
 
+func TestGenerateJobNamePrefix(t *testing.T) {
+	testCases := []struct {
+		name     string
+		username string
+		expected string
+	}{
+		{"Email", "example.two@cloud.com", "example-two"},
+		{"PlainName", "Jorrit", "jorrit"},
+		{"MixedCaseEmail", "Jake.Jongejans@student.uva.nl", "jake-jongejans"},
+		{"LeadingTrailingSymbols", "_weird.name_@x.com", "weird-name"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := GenerateJobName(tc.username, 8)
+			assert.Equal(t, tc.expected+"-", got[:len(tc.expected)+1])
+			assert.Equal(t, len(tc.expected)+1+8, len(got))
+		})
+	}
+}
+
 func TestGenerateGuid(t *testing.T) {
 	testCases := []struct {
 		name     string

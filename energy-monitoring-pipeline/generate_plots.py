@@ -11,12 +11,15 @@ from matplotlib.patches import Patch
 import matplotlib.patheffects as pe
 from pathlib import Path
 
+# PREFIX = "scattered_"
+PREFIX = ""
+
 CORRELATION_CONFIG = {
-        "Baseline": "baseline_experiment",
+        "Baseline": f"{PREFIX}baseline_experiment",
         # "Event-driven": "baseline_event_driven",
-        "FedBCD": "fed_bcd_experiment",
-        "Overlap-FedBCD": "overlap_fed_bcd_experiment",
-        "FedEncrypt": "fed_encrypt_experiment"
+        "FedBCD": f"{PREFIX}fed_bcd_experiment",
+        "Overlap-FedBCD": f"{PREFIX}overlap_fed_bcd_experiment",
+        "FedEncrypt": f"{PREFIX}es_fed_encrypt_experiment"
     }
 
 # CORRELATION_CONFIG = {
@@ -28,9 +31,10 @@ CORRELATION_CONFIG = {
 #     }
 
 CORRELATION_COLUMNS = [
-    ("total_carbon_emission_difference","Carbon Emission (gCO2e/KWh)", "cab", 1000),
-    ("execution_time","Execution Time (s)", "ex", 1)
-]
+    ("total_carbon_emission_difference", 'Mean Carbon Emission (gCO2e/KWh)', "cab", 1000),
+    ("execution_time", 'Mean Execution Time (s)', "ex", 1),
+    ("accuracy", 'Mean Accuracy (%)', "acc", 1)
+    ]
 
 def main():
     plot_sidecar, plot_accuracies, plot_correlation, plot_box, plot_pareto, is_local, both_environments, plot_bar = _resolve_args()
@@ -41,7 +45,7 @@ def main():
         _generate_sidecar_plot()
 
     if plot_correlation:
-        _generate_correlation_plot(is_local, both_environments)
+        # _generate_correlation_plot(is_local, both_environments)
         _generate_mean_correlation_plot(is_local, both_environments)
         # _generate_correlation_matrix(is_local, both_environments)
         # _generate_correlation_shrinked_matrix()
@@ -57,8 +61,8 @@ def main():
         _generate_mean_pareto_plot(is_local, both_environments)
 
     if plot_bar:
-        # _generate_distributed_bar_plot(is_local, both_environments)
-        _generate_bar_plot()
+        _generate_distributed_bar_plot(is_local, both_environments)
+        # _generate_bar_plot()
 
 def _generate_sidecar_plot():
     print("> Generating sidecar plot")
@@ -149,10 +153,9 @@ def _generate_mean_correlation_plot_by_column(column_name, column_label, column_
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()
 
-    file_name = f"{conf.PLOT_OUTPUT_FOLDER}/paper_en_{column_prefix}_mean_correlation_{_resolve_mode_name(is_local, both_environments)}_plot.pdf"
-    plt.savefig(file_name, bbox_inches='tight')
+    file_name = f"paper_en_{column_prefix}_mean_correlation_{_resolve_mode_name(is_local, both_environments)}_plot"
+    _save_plot(plt, file_name)
     plt.close()
-    print(f"Plot saved in {file_name}!")
 
 def _generate_correlation_plot(is_local, both_environments):
     for column_name, column_label, column_prefix, column_scale in CORRELATION_COLUMNS:
@@ -207,10 +210,9 @@ def _generate_correlation_plot_by_column(column_name, column_label, column_prefi
 
     label = _resolve_mode_name(is_local, both_environments)
 
-    file_name = f"{conf.PLOT_OUTPUT_FOLDER}/paper_en_{column_prefix}_correlation_{label}_plot.pdf"
-    plt.savefig(file_name, bbox_inches='tight')
+    file_name = f"paper_en_{column_prefix}_correlation_{label}_plot"
+    _save_plot(plt, file_name)
     plt.close()
-    print(f"Plot saved in {file_name}!")
 
 def _generate_correlation_matrix(is_local, both_environments):
     print("> Generating correlation matrix heatmap")
@@ -273,10 +275,9 @@ def _generate_correlation_matrix(is_local, both_environments):
 
     plt.tight_layout()
 
-    file_name = f"{conf.PLOT_OUTPUT_FOLDER}/correlation_{_resolve_mode_name(is_local, both_environments)}_matrix.pdf"
-    plt.savefig(file_name, bbox_inches='tight')
+    file_name = f"correlation_{_resolve_mode_name(is_local, both_environments)}_matrix"
+    _save_plot(plt, file_name)
     plt.close()
-    print(f"Correlation matrix saved in {file_name}!")
 
 def _generate_correlation_shrinked_matrix():
     print("> Generating compact correlation matrix heatmap (Local vs Fabric)")
@@ -316,11 +317,11 @@ def _generate_correlation_shrinked_matrix():
     # (since the goal is explicitly to show Local vs Fabric side-by-side)
     results["Local"] = _get_env_correlations(True)
     results["Fabric"] = _get_env_correlations(False, {
-        "Baseline": "distributed_baseline_experiment",
+        "Baseline": "scattered_baseline_experiment",
         # "Event-driven": "baseline_event_driven",
-        "FedBCD": "distributed_fed_bcd_experiment",
-        "Overlap-FedBCD": "distributed_overlap_fed_bcd_experiment",
-        "FedEncrypt": "distributed_fed_encrypt_experiment"
+        "FedBCD": "scattered_fed_bcd_experiment",
+        "Overlap-FedBCD": "scattered_overlap_fed_bcd_experiment",
+        "FedEncrypt": "scattered_es_fed_encrypt_experiment"
     })
     
     corr_df = pd.DataFrame(results, index=pairs.keys()).T
@@ -344,10 +345,8 @@ def _generate_correlation_shrinked_matrix():
     plt.xticks(rotation=12, fontsize=9)
     plt.tight_layout()
 
-    file_name = f"{conf.PLOT_OUTPUT_FOLDER}/correlation_matrix.pdf"
-    plt.savefig(file_name, bbox_inches='tight')
+    _save_plot(plt, "correlation_matrix")
     plt.close()
-    print(f"Compact correlation matrix saved in {file_name}!")
 
 def _generate_accuracies_plot():
     print("> Generating accuracies plot")
@@ -356,10 +355,10 @@ def _generate_accuracies_plot():
     plt.figure(figsize=(10, 6))
     
     json_files = {
-        "Baseline": "experiments/fabric/baseline_experiment_260623_1609/experiments.json",
-        "Fed-BCD": "experiments/fabric/fed_bcd_experiment_260623_2335/experiments.json",
-        "Overlap-FedBCD": "experiments/fabric/overlap_fed_bcd_experiment_260625_1502/experiments.json",
-        "Fed-Encrypt": "experiments/fabric/fed_encrypt_experiment_260626_2016/experiments.json"
+        "Baseline": "experiments/fabric/scattered_baseline_experiment_260916_1427/experiments.json",
+        "FedBCD": "experiments/fabric/scattered_fed_bcd_experiment_260919_0712/experiments.json",
+        "Overlap-FedBCD": "experiments/fabric/scattered_overlap_fed_bcd_experiment_260919_2345/experiments.json",
+        "FedEncrypt": "experiments/fabric/scattered_es_fed_encrypt_experiment_260920_1645/experiments.json"
     }
     
     if not json_files:
@@ -372,7 +371,7 @@ def _generate_accuracies_plot():
             with open(file_path, 'r') as f:
                 metrics_data = json.load(f)
             
-            run_data = metrics_data["0"]
+            run_data = metrics_data["1"]
             accuracies_list = run_data["accuracies"]
             
             if not accuracies_list:
@@ -380,14 +379,14 @@ def _generate_accuracies_plot():
             
             rounds = [item["train_round"] for item in accuracies_list]
 
-            if name in ["Fed-BCD", "Overlap-FedBCD"]:
+            if name in ["FedBCD", "Overlap-FedBCD"]:
                 rounds = [item["train_round"] * 15 for item in accuracies_list]
             else:
                 rounds = [item["train_round"] for item in accuracies_list]
 
             accuracies = [item["accuracy"] for item in accuracies_list]
 
-            if name == "Fed-Encrypt":
+            if name == "FedEncrypt":
                 # There is an issue that accuracies in Fed-encrypt returns the float value not %.
                 accuracies = [item["accuracy"] * 100 for item in accuracies_list]
             
@@ -459,202 +458,195 @@ def _generate_box_plot(is_local, both_environments):
 
 def _generate_pareto_plot(is_local, both_environments):
     print("> Generating Pareto front plot")
-    plt.figure(figsize=(6, 5))
 
-    data_points = []
-    
-    strategy_mapping = {}
-    
-    num_strategies = len(CORRELATION_CONFIG) * (2 if both_environments else 1)
-    colors = sns.color_palette("tab10", num_strategies)
-    color_idx = 0
-
-    column = ("total_carbon_emission_difference", 'Carbon Emission (gCO2e/KWh)', 1000, "cab")
-    # column = ("execution_time", 'Execution Time (s)', 1, "ex")
-    # column = ("accuracy", 'Accuracy (%)', 1, "acc")
-
-    def _read_data(is_local_flag, include_mode_in_label):
-        nonlocal color_idx
-        for name, file_prefix in CORRELATION_CONFIG.items():
-            total_metrics_data, _, _ = utils.read_experiments_by_prefix(file_prefix, is_local_flag)
-            
-            if include_mode_in_label:
-                name = f"{name}_{_resolve_mode_name(is_local_flag)}"
-            
-            if name not in strategy_mapping:
-                strategy_mapping[name] = colors[color_idx]
-                color_idx += 1
-                
-            for index, row in total_metrics_data.iterrows():
-                energy = row["total_energy_difference"]
-                compare = row[column[0]] * column[2]
-                # compare = row["total_carbon_emission_difference"] * 1000
-                # compare = row["execution_time"]
-                # compare = row["accuracy"]
-                data_points.append((name, compare, energy))
-
-    # Read data based on environment flags
-    _read_data(is_local, both_environments)
-
-    if both_environments:
-        _read_data(not is_local, both_environments)
-
-    if not data_points:
-        print("Warning: No data available for Pareto plot.")
-        return
-
-    # Sort data primarily by Carbon Emission (X) ascending, then Energy (Y) ascending
-    # sorted_data = sorted(data_points, key=lambda x: (x[1], x[2]))
-    # Only for accuracy
-    sorted_data = sorted(data_points, key=lambda x: (-x[1], x[2]))
-
-    pareto_front = []
-    min_energy_so_far = float('inf')
-    
-    for strategy, compare, energy in sorted_data:
-        if energy < min_energy_so_far:
-            pareto_front.append((strategy, compare, energy))
-            min_energy_so_far = energy
-
-    # Only for accuracy
-    pareto_front = sorted(pareto_front, key=lambda x: x[1])
-
-    for strategy_name, color in strategy_mapping.items():
-        s_emissions = [p[1] for p in data_points if p[0] == strategy_name]
-        s_energies = [p[2] for p in data_points if p[0] == strategy_name]
+    def _generate(column):
+        plt.figure(figsize=(6, 5))
         
-        plt.scatter(s_emissions, s_energies, color=color, label=strategy_name, s=40, alpha=0.5, zorder=2)
+        data_points = []
+        
+        strategy_mapping = {}
+        
+        num_strategies = len(CORRELATION_CONFIG) * (2 if both_environments else 1)
+        colors = sns.color_palette("tab10", num_strategies)
+        color_idx = 0
 
-    pareto_emissions = [row[1] for row in pareto_front]
-    pareto_energies = [row[2] for row in pareto_front]
-
-    plt.scatter([], [], facecolor='none', edgecolor='black', s=100, linewidth=1.5, 
-                label='Pareto Solution')
-
-    for strategy, compare, energy in pareto_front:
-        plt.scatter(compare, energy, color=strategy_mapping[strategy], s=100, edgecolor='black', zorder=4)
+        def _read_data(is_local_flag, include_mode_in_label):
+            nonlocal color_idx
+            for name, file_prefix in CORRELATION_CONFIG.items():
+                total_metrics_data, _, _ = utils.read_experiments_by_prefix(file_prefix, is_local_flag)
+                
+                if include_mode_in_label:
+                    name = f"{name}_{_resolve_mode_name(is_local_flag)}"
+                
+                if name not in strategy_mapping:
+                    strategy_mapping[name] = colors[color_idx]
+                    color_idx += 1
+                    
+                for index, row in total_metrics_data.iterrows():
+                    energy = row["total_energy_difference"]
+                    compare = row[column[0]] * column[3]
+                    data_points.append((name, compare, energy))
+        
+        # Read data based on environment flags
+        _read_data(is_local, both_environments)
     
-    plt.plot(pareto_emissions, pareto_energies, color='red', linestyle='--', linewidth=2, zorder=3)
+        if both_environments:
+            _read_data(not is_local, both_environments)
+    
+        if not data_points:
+            print("Warning: No data available for Pareto plot.")
+            return
+    
+        # Sort data primarily by Carbon Emission (X) ascending, then Energy (Y) ascending
+        # sorted_data = sorted(data_points, key=lambda x: (x[1], x[2]))
+        # Only for accuracy
+        sorted_data = sorted(data_points, key=lambda x: (-x[1], x[2]))
+    
+        pareto_front = []
+        min_energy_so_far = float('inf')
+        
+        for strategy, compare, energy in sorted_data:
+            if energy < min_energy_so_far:
+                pareto_front.append((strategy, compare, energy))
+                min_energy_so_far = energy
+    
+        # Only for accuracy
+        pareto_front = sorted(pareto_front, key=lambda x: x[1])
+    
+        for strategy_name, color in strategy_mapping.items():
+            s_emissions = [p[1] for p in data_points if p[0] == strategy_name]
+            s_energies = [p[2] for p in data_points if p[0] == strategy_name]
+            
+            plt.scatter(s_emissions, s_energies, color=color, label=strategy_name, s=40, alpha=0.5, zorder=2)
+    
+        pareto_emissions = [row[1] for row in pareto_front]
+        pareto_energies = [row[2] for row in pareto_front]
+    
+        plt.scatter([], [], facecolor='none', edgecolor='black', s=100, linewidth=1.5, 
+                    label='Pareto Solution')
+    
+        for strategy, compare, energy in pareto_front:
+            plt.scatter(compare, energy, color=strategy_mapping[strategy], s=100, edgecolor='black', zorder=4)
+        
+        plt.plot(pareto_emissions, pareto_energies, color='red', linestyle='--', linewidth=2, zorder=3)
+    
+        plt.xlabel(column[1], fontsize=12)
+        # plt.xlabel('Accuracy (%)', fontsize=12)
+        # plt.xlabel('Execution Time (s)', fontsize=12)
+        # plt.xlabel('Carbon Emission (gCO2e/KWh)', fontsize=12)
+        plt.ylabel('Energy Consumption (J)', fontsize=12)
+        plt.grid(True, linestyle=':', alpha=0.7)
+        
+        plt.legend(loc='best', fontsize=10)
+    
+        plt.tight_layout()
+        file_name = f"paper_{column[2]}_pareto_front_{_resolve_mode_name(is_local, both_environments)}"
+        _save_plot(plt, file_name)
+        plt.close()
+                
+        optimal_strategies = set([p[0] for p in pareto_front])
+        print("Strategies that reached the Pareto Front:")
+        for s in optimal_strategies:
+            print(f"- {s}")
 
-    plt.xlabel(column[1], fontsize=12)
-    # plt.xlabel('Accuracy (%)', fontsize=12)
-    # plt.xlabel('Execution Time (s)', fontsize=12)
-    # plt.xlabel('Carbon Emission (gCO2e/KWh)', fontsize=12)
-    plt.ylabel('Energy Consumption (J)', fontsize=12)
-    plt.grid(True, linestyle=':', alpha=0.7)
-    
-    plt.legend(loc='best', fontsize=10)
-
-    plt.tight_layout()
-    file_name = f"{conf.PLOT_OUTPUT_FOLDER}/paper_{column[3]}_pareto_front_{_resolve_mode_name(is_local, both_environments)}.pdf"
-    plt.savefig(file_name, bbox_inches='tight')
-    plt.close()
-    
-    print(f"Plot saved in {file_name}!")
-    
-    optimal_strategies = set([p[0] for p in pareto_front])
-    print("Strategies that reached the Pareto Front:")
-    for s in optimal_strategies:
-        print(f"- {s}")
+    for column in CORRELATION_COLUMNS:
+        _generate(column)
 
 def _generate_mean_pareto_plot(is_local, both_environments):
     print("> Generating Pareto front plot")
-    plt.figure(figsize=(6, 5))
 
-    data_points = []
-    
-    strategy_mapping = {}
-    num_strategies = len(CORRELATION_CONFIG) * (2 if both_environments else 1)
-    colors = sns.color_palette("tab10", num_strategies)
-    color_idx = 0
-
-    column = ("total_carbon_emission_difference", 'Mean Carbon Emission (gCO2e/KWh)', 1000, "cab")
-    # column = ("execution_time", 'Mean Execution Time (s)', 1, "ex")
-    # column = ("accuracy", 'Mean Accuracy (%)', 1, "acc")
-
-    def _read_data(is_local_flag, include_mode_in_label):
-        nonlocal color_idx
-        for name, file_prefix in CORRELATION_CONFIG.items():
-            total_metrics_data, _, _ = utils.read_experiments_by_prefix(file_prefix, is_local_flag)
-            
-            mean_energy = total_metrics_data["total_energy_difference"].mean()
-            mean_cab = total_metrics_data[column[0]].mean()*column[2]
-            # mean_cab = total_metrics_data["total_carbon_emission_difference"].mean()*1000
-            # mean_cab = total_metrics_data["execution_time"].mean()
-            # mean_cab = total_metrics_data["accuracy"].mean()
-            
-            if include_mode_in_label:
-                name = f"{name}_{_resolve_mode_name(is_local_flag)}"
-                
-            if name not in strategy_mapping:
-                strategy_mapping[name] = colors[color_idx]
-                color_idx += 1
-                
-            data_points.append((name, mean_cab, mean_energy))
-
-    _read_data(is_local, both_environments)
-
-    if both_environments:
-        _read_data(not is_local, both_environments)
-
-    if not data_points:
-        print("Warning: No data available for Pareto plot.")
-        return
-
-    # sorted_data = sorted(data_points, key=lambda x: (x[1], x[2]))
-    # Only for accuracy
-    sorted_data = sorted(data_points, key=lambda x: (-x[1], x[2]))
-
-    pareto_front = []
-    min_energy_so_far = float('inf')
-    
-    for strategy, mean_cab, mean_energy in sorted_data:
-        if mean_energy < min_energy_so_far:
-            pareto_front.append((strategy, mean_cab, mean_energy))
-            min_energy_so_far = mean_energy
-
-    # Only for accuracy
-    pareto_front = sorted(pareto_front, key=lambda x: x[1])
-
-    for strategy_name, color in strategy_mapping.items():
-        s_emissions = [p[1] for p in data_points if p[0] == strategy_name]
-        s_energies = [p[2] for p in data_points if p[0] == strategy_name]
+    def _generate(column):
+        plt.figure(figsize=(6, 5))
         
-        plt.scatter(s_emissions, s_energies, color=color, s=100, label=strategy_name, zorder=3)
+        data_points = []
+        
+        strategy_mapping = {}
+        num_strategies = len(CORRELATION_CONFIG) * (2 if both_environments else 1)
+        colors = sns.color_palette("tab10", num_strategies)
+        color_idx = 0
+        
+        def _read_data(is_local_flag, include_mode_in_label):
+            nonlocal color_idx
+            for name, file_prefix in CORRELATION_CONFIG.items():
+                total_metrics_data, _, _ = utils.read_experiments_by_prefix(file_prefix, is_local_flag)
+                
+                mean_energy = total_metrics_data["total_energy_difference"].mean()
+                mean_cab = total_metrics_data[column[0]].mean()*column[3]
+                
+                if include_mode_in_label:
+                    name = f"{name}_{_resolve_mode_name(is_local_flag)}"
+                    
+                if name not in strategy_mapping:
+                    strategy_mapping[name] = colors[color_idx]
+                    color_idx += 1
+                    
+                data_points.append((name, mean_cab, mean_energy))
 
-    pareto_emissions = [row[1] for row in pareto_front]
-    pareto_energies = [row[2] for row in pareto_front]
+        _read_data(is_local, both_environments)
 
-    plt.scatter([], [], facecolor='none', edgecolor='black', s=150, linewidth=1.5, 
-                label='Pareto Solution')
+        if both_environments:
+            _read_data(not is_local, both_environments)
 
-    for strategy, emissions, energy in pareto_front:
-        plt.scatter(emissions, energy, color=strategy_mapping[strategy], s=150, edgecolor='black', zorder=4)
+        if not data_points:
+            print("Warning: No data available for Pareto plot.")
+            return
 
-    plt.plot(pareto_emissions, pareto_energies, color='red', linestyle='--', linewidth=2, zorder=2)
+        # sorted_data = sorted(data_points, key=lambda x: (x[1], x[2]))
+        # Only for accuracy
+        sorted_data = sorted(data_points, key=lambda x: (-x[1], x[2]))
 
-    all_emissions = [row[1] for row in data_points]
-    all_energies = [row[2] for row in data_points]
-    labels = [row[0] for row in data_points]
+        pareto_front = []
+        min_energy_so_far = float('inf')
+        
+        for strategy, mean_cab, mean_energy in sorted_data:
+            if mean_energy < min_energy_so_far:
+                pareto_front.append((strategy, mean_cab, mean_energy))
+                min_energy_so_far = mean_energy
 
-    plt.xlabel(column[1], fontsize=12)
-    # plt.xlabel('Mean Accuracy (%)', fontsize=12)
-    # plt.xlabel('Mean Execution Time (s)', fontsize=12)
-    # plt.xlabel('Mean Carbon Emission (gCO2e/KWh)', fontsize=12)
-    plt.ylabel('Mean Energy Consumption (J)', fontsize=12)
-    plt.grid(True, linestyle=':', alpha=0.7)
-    
-    plt.legend(loc='best', fontsize=10)
+        # Only for accuracy
+        pareto_front = sorted(pareto_front, key=lambda x: x[1])
 
-    plt.tight_layout()
-    file_name = f"{conf.PLOT_OUTPUT_FOLDER}/paper_{column[3]}_pareto_front_mean_{_resolve_mode_name(is_local, both_environments)}_plot.pdf"
-    plt.savefig(file_name, bbox_inches='tight')
-    plt.close()
-    
-    print(f"Plot saved in {file_name}!")
-    print("Pareto Optimal Strategies identified:")
-    for p in pareto_front:
-        print(f"- {p[0]}")
+        for strategy_name, color in strategy_mapping.items():
+            s_emissions = [p[1] for p in data_points if p[0] == strategy_name]
+            s_energies = [p[2] for p in data_points if p[0] == strategy_name]
+            
+            plt.scatter(s_emissions, s_energies, color=color, s=100, label=strategy_name, zorder=3)
+
+        pareto_emissions = [row[1] for row in pareto_front]
+        pareto_energies = [row[2] for row in pareto_front]
+
+        plt.scatter([], [], facecolor='none', edgecolor='black', s=150, linewidth=1.5, 
+                    label='Pareto Solution')
+
+        for strategy, emissions, energy in pareto_front:
+            plt.scatter(emissions, energy, color=strategy_mapping[strategy], s=150, edgecolor='black', zorder=4)
+
+        plt.plot(pareto_emissions, pareto_energies, color='red', linestyle='--', linewidth=2, zorder=2)
+
+        all_emissions = [row[1] for row in data_points]
+        all_energies = [row[2] for row in data_points]
+        labels = [row[0] for row in data_points]
+
+        plt.xlabel(column[1], fontsize=12)
+        # plt.xlabel('Mean Accuracy (%)', fontsize=12)
+        # plt.xlabel('Mean Execution Time (s)', fontsize=12)
+        # plt.xlabel('Mean Carbon Emission (gCO2e/KWh)', fontsize=12)
+        plt.ylabel('Mean Energy Consumption (J)', fontsize=12)
+        plt.grid(True, linestyle=':', alpha=0.7)
+        
+        plt.legend(loc='best', fontsize=10)
+
+        plt.tight_layout()
+        file_name = f"paper_{column[2]}_pareto_front_mean_{_resolve_mode_name(is_local, both_environments)}_plot"
+        _save_plot(plt, file_name)
+        plt.close()
+        
+        print("Pareto Optimal Strategies identified:")
+        for p in pareto_front:
+            print(f"- {p[0]}")
+
+    for column in CORRELATION_COLUMNS:
+        _generate(column)
 
 def _get_site_mapping(config_path="../fabric/resources/node_configuration.json"):
     try:
@@ -662,7 +654,7 @@ def _get_site_mapping(config_path="../fabric/resources/node_configuration.json")
             nodes = json.load(f)
     except FileNotFoundError:
         print(f"Warning: {config_path} not found. Using fallback mapping.")
-        return {"AMST": [], "LOSA": [], "TOKY": []}
+        return {"AMST": [], "LOSA": [], "HAWI": []}
 
     site_mapping = {}
     for node in nodes:
@@ -694,7 +686,7 @@ def get_site_metrics(active_dict, idle_dict, site_mapping, sites):
         for key in all_keys
     }
 
-    print(net_metrics)
+    # print(net_metrics)
     
     site_sums = []
     for site in sites:
@@ -702,7 +694,7 @@ def get_site_metrics(active_dict, idle_dict, site_mapping, sites):
         site_total = sum(max(0.0, active_means.get(agent, 0.0)) for agent in agents)
         site_sums.append(site_total)
 
-    print(site_sums)
+    # print(site_sums)
     return site_sums
 
 def get_dynamic_limits(totals):    
@@ -726,12 +718,12 @@ def get_dynamic_limits(totals):
         lower_max = max_raw * 1.05
         upper_min = max_raw * 0.95
         
-    return 250, 30, 100
+    return 25, 20, 25
 
 def _generate_distributed_bar_plot(is_local, both_environments):
     print("> Generating separate stacked bar plots for Energy and Carbon")
     
-    components = ["LOSA", "AMST", "TOKY"]
+    components = ["LOSA", "AMST", "HAWI"]
     site_mapping = _get_site_mapping()
     
     methods = []
@@ -906,10 +898,10 @@ def _generate_bar_plot():
 
             if not is_local:
                 config = {
-                    "Baseline": "distributed_baseline_experiment",
-                    "FedBCD": "distributed_fed_bcd_experiment",
-                    "Overlap-FedBCD": "distributed_overlap_fed_bcd_experiment",
-                    "FedEncrypt": "distributed_fed_encrypt_experiment"
+                    "Baseline": "scattered_baseline_experiment",
+                    "FedBCD": "scattered_fed_bcd_experiment",
+                    "Overlap-FedBCD": "scattered_overlap_fed_bcd_experiment",
+                    "FedEncrypt": "scattered_es_fed_encrypt_experiment"
                 }
 
             baseline_df, _, _ = utils.read_experiments_by_prefix(config["Baseline"], is_local)
@@ -980,14 +972,20 @@ def _generate_bar_plot():
     
         output_path = f"{conf.PLOT_OUTPUT_FOLDER}/{column_prefix}_bar_plot.pdf"
         fig.savefig(output_path, dpi=600, bbox_inches="tight")
+        print(f"Plot saved in {output_path}!")
     
-        plt.show()
+        plt.close()
 
     for column_name, column_caption, column_prefix in columns:
             _generate(column_name, column_caption, column_prefix)
 
 def _set_font_size(plt):
     plt.rcParams.update({'font.size': 16})
+
+def _save_plot(plt, file_name: str):
+    output_path = f"{conf.PLOT_OUTPUT_FOLDER}/{file_name}.pdf"
+    plt.savefig(output_path, bbox_inches='tight')
+    print(f"Plot saved in {output_path}!")
 
 def _resolve_args():
     parser = argparse.ArgumentParser()
@@ -1009,7 +1007,6 @@ def _resolve_args():
     plot_bar = args.bar_plot
 
     return plot_sidecar, plot_accuracies, plot_correlation, plot_box, plot_pareto, not args.fabric_mode, args.both_environments, plot_bar
-
 
 if __name__ == '__main__':
     main()

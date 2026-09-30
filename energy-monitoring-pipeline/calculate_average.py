@@ -61,13 +61,10 @@ def _calculate_statistics(total_metrics_data, metrics_data, aggregated_data, out
     print(f"Saved final average experiments file to [{output_file_path}]!")
 
 def _calculate_total_metrics_statistics(metrics: pd.DataFrame, output_path:str):
-    properties_to_calculate = [
-        "total_idle_energy",
-        "total_active_energy",
-        "total_energy_difference",
-        "total_idle_carbon_emission",
-        "total_active_carbon_emission",
-        "total_carbon_emission_difference"
+    properties_to_exclude = [
+        "run",
+        "execution_time",
+        "accuracy"
     ]
 
     mean_properties = {}
@@ -76,7 +73,10 @@ def _calculate_total_metrics_statistics(metrics: pd.DataFrame, output_path:str):
     metrics_mean_path = f"{output_path}/average_total_metrics_mean.csv"
     metrics_std_path = f"{output_path}/average_total_metrics_std.csv"
 
-    for property_name in properties_to_calculate:
+    for property_name in metrics.columns:
+        if property_name in properties_to_exclude:
+            continue
+
         mean_properties[property_name] = metrics[property_name].mean()
         std_properties[property_name] = metrics[property_name].std()
 

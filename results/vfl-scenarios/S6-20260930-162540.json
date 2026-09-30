@@ -1,0 +1,73 @@
+{
+    "metadata": {
+        "policy_check_interval": 1,
+        "policy_reintroduction": -1,
+        "policy_removal": -1,
+        "total_rounds": 10,
+        "training_backtrack": 0
+    },
+    "request_id": "5e9aa2e7-cc08-43ab-8a2b-a226397300eb",
+    "results": [
+        {
+            "accuracy": 64.79190101237346,
+            "clients": 3,
+            "timestamp": "2026-09-30T14:18:28Z",
+            "train_round": 0
+        },
+        {
+            "accuracy": 66.70416197975253,
+            "clients": 3,
+            "timestamp": "2026-09-30T14:18:31Z",
+            "train_round": 1
+        },
+        {
+            "accuracy": 68.7289088863892,
+            "clients": 3,
+            "timestamp": "2026-09-30T14:18:35Z",
+            "train_round": 2
+        },
+        {
+            "accuracy": 68.7289088863892,
+            "clients": 3,
+            "timestamp": "2026-09-30T14:18:38Z",
+            "train_round": 3
+        },
+        {
+            "accuracy": 48.25646794150732,
+            "clients": 2,
+            "timestamp": "2026-09-30T14:18:45Z",
+            "train_round": 4
+        },
+        {
+            "accuracy": 51.74353205849269,
+            "clients": 2,
+            "timestamp": "2026-09-30T14:24:29Z",
+            "train_round": 5
+        },
+        {
+            "accuracy": 54.668166479190106,
+            "clients": 2,
+            "timestamp": "2026-09-30T14:24:32Z",
+            "train_round": 6
+        },
+        {
+            "accuracy": 55.34308211473565,
+            "clients": 2,
+            "timestamp": "2026-09-30T14:24:34Z",
+            "train_round": 7
+        },
+        {
+            "accuracy": 55.90551181102362,
+            "clients": 2,
+            "timestamp": "2026-09-30T14:24:37Z",
+            "train_round": 8
+        },
+        {
+            "accuracy": 56.46794150731158,
+            "clients": 2,
+            "timestamp": "2026-09-30T14:24:40Z",
+            "train_round": 9
+        }
+    ],
+    "status": "done"
+}

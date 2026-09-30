@@ -1,0 +1,39 @@
+{
+    "metadata": {
+        "policy_check_interval": 1,
+        "policy_reintroduction": -1,
+        "policy_removal": -1,
+        "stop_reason": "the server is not authorized by policy",
+        "stopped_before_round": 4,
+        "total_rounds": 10,
+        "training_backtrack": 0
+    },
+    "request_id": "fdf9f9fd-2fdc-45a8-93cb-e51e165ce01d",
+    "results": [
+        {
+            "accuracy": 65.91676040494939,
+            "clients": 3,
+            "timestamp": "2026-09-30T13:02:23Z",
+            "train_round": 0
+        },
+        {
+            "accuracy": 66.36670416197975,
+            "clients": 3,
+            "timestamp": "2026-09-30T13:02:26Z",
+            "train_round": 1
+        },
+        {
+            "accuracy": 66.81664791901012,
+            "clients": 3,
+            "timestamp": "2026-09-30T13:02:30Z",
+            "train_round": 2
+        },
+        {
+            "accuracy": 66.81664791901012,
+            "clients": 3,
+            "timestamp": "2026-09-30T13:02:33Z",
+            "train_round": 3
+        }
+    ],
+    "status": "failed"
+}

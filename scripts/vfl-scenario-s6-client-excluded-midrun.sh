@@ -22,6 +22,8 @@ MAX_POLLS="${MAX_POLLS:-900}"
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vfl-scenario-common.sh"
 
+SCENARIO_NAME="S6"
+
 DROPPED_CLIENT="${DROPPED_CLIENT:-clientthree}"
 REVOKE_AFTER_ROUNDS="${REVOKE_AFTER_ROUNDS:-3}"
 case "$DROPPED_CLIENT" in

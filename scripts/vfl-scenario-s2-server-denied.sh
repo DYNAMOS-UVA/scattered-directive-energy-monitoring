@@ -11,6 +11,8 @@
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vfl-scenario-common.sh"
 
+SCENARIO_NAME="S2"
+
 setup
 
 revoke_requestor server

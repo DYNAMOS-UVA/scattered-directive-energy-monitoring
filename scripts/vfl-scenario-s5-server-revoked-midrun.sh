@@ -22,6 +22,8 @@ MAX_POLLS="${MAX_POLLS:-900}"
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vfl-scenario-common.sh"
 
+SCENARIO_NAME="S5"
+
 REVOKE_AFTER_ROUNDS="${REVOKE_AFTER_ROUNDS:-3}"
 [ "$POLICY_CHECK_INTERVAL" -ge 1 ] || fail "POLICY_CHECK_INTERVAL must be >= 1: with 0 there are no mid-run checks to stop the run"
 [ "$REVOKE_AFTER_ROUNDS" -lt "$CYCLES" ] || fail "REVOKE_AFTER_ROUNDS must be smaller than CYCLES"

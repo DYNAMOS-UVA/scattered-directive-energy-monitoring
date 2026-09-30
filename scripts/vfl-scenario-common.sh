@@ -128,6 +128,8 @@ print("invalid:", sorted(d.get("invalid_dataproviders") or []))'
 
 # submit_vfl_request — submits a vflTrainModelRequest and sets REQUEST_ID.
 FINAL_STATUS_FILE="/tmp/vfl-scenario-final-status.json"
+RESULTS_DIR="${RESULTS_DIR:-${REPO_ROOT}/results/vfl-scenarios}"
+SCENARIO_NAME="${SCENARIO_NAME:-scenario}"
 REQUEST_ID=""
 
 submit_vfl_request() {
@@ -227,6 +229,19 @@ wait_until_client_count() {
     fail "timed out waiting for a round with ${target} clients"
 }
 
+# save_final_status — persist the final status JSON with scenario name and timestamp.
+save_final_status() {
+    local timestamp output_file
+
+    timestamp=$(date +"%Y%m%d-%H%M%S")
+    mkdir -p "$RESULTS_DIR"
+
+    output_file="${RESULTS_DIR}/${SCENARIO_NAME}-${timestamp}.json"
+    cp "$FINAL_STATUS_FILE" "$output_file"
+
+    echo "Final status JSON saved to: ${output_file}"
+}
+
 # wait_for_vfl_request — polls until done/failed and writes the final status
 # JSON to $FINAL_STATUS_FILE.
 wait_for_vfl_request() {
@@ -238,6 +253,7 @@ wait_for_vfl_request() {
 
         if [ "$status" = "done" ] || [ "$status" = "failed" ]; then
             echo "$status_response" > "$FINAL_STATUS_FILE"
+            save_final_status
             return
         fi
         sleep "$POLL_INTERVAL_SECONDS"

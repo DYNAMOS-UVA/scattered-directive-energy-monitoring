@@ -14,6 +14,8 @@
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vfl-scenario-common.sh"
 
+SCENARIO_NAME="S3"
+
 DROPPED_CLIENT="${DROPPED_CLIENT:-clientthree}"
 case "$DROPPED_CLIENT" in
     clientone|clienttwo|clientthree) ;;

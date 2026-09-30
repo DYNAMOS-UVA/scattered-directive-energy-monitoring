@@ -29,10 +29,10 @@ spec:
           httpGet:
             path: /api/v1/readyz
             port: 8080
-          initialDelaySeconds: 5
+          initialDelaySeconds: 10
           periodSeconds: 10
-          timeoutSeconds: 2
-          failureThreshold: 3
+          timeoutSeconds: 5
+          failureThreshold: 5
         volumeMounts:
         - name: eflint-states
           mountPath: /app/eflint-states

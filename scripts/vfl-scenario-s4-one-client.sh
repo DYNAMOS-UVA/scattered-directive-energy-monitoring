@@ -14,6 +14,9 @@
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vfl-scenario-common.sh"
 
+
+SCENARIO_NAME="S4"
+
 KEPT_CLIENT="${KEPT_CLIENT:-clientone}"
 case "$KEPT_CLIENT" in
     clientone|clienttwo|clientthree) ;;

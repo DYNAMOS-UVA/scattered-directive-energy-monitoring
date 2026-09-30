@@ -14,6 +14,8 @@
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vfl-scenario-common.sh"
 
+SCENARIO_NAME="S1"
+
 setup
 show_policy_verdict
 

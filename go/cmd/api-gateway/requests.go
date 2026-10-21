@@ -813,7 +813,7 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	wg.Wait()
 	shutdown.finish()
 
-	metadata["timing"] = map[string]any{
+	runSummary := map[string]any{
 		"clock":                    "api-gateway",
 		"approval_ms":              toMs(approvalDuration),
 		"warmup":                   warmup.summary(),
@@ -827,6 +827,8 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		"shutdown":                 shutdown.summary(),
 		"total_ms":                 toMs(approvalDuration + time.Since(trainingStart)),
 	}
+	timingTotals.timing.report(runSummary)
+	metadata["timing"] = runSummary
 
 	response := map[string]any{
 		"jobId":    jobId,

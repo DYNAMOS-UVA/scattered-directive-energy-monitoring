@@ -1,19 +1,25 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/Jorrit05/DYNAMOS/pkg/lib"
 )
 
 // Gateway-side timing of a distributed training run. The gateway drives every
 // phase, so it can measure wall-clock phase durations, per-participant round
-// trips and payload sizes without changes to agents or algorithm code. All
-// durations come from a single (monotonic) clock, so they are skew-free.
+// trips and payload sizes without changes to agents or algorithm code.
+// Durations use local monotonic clocks, never cross-node timestamps.
 //
 // A round trip includes transport, queueing and the participant's compute; the
-// gateway cannot separate these. barrier_wait_ms is the synchronisation cost:
+// gateway separates these only when the job sidecar provides a duration.
+// barrier_wait_ms is the synchronisation cost:
 // the summed time participants that finished a parallel phase early spent
 // waiting for the slowest one.
 
@@ -24,6 +30,7 @@ type callTiming struct {
 	bytesSent   int
 	bytesRecv   int
 	failed      bool
+	algorithm   *time.Duration
 }
 
 type phaseRecorder struct {
@@ -44,6 +51,14 @@ func (p *phaseRecorder) send(participant, endpoint string, body []byte) (string,
 	resp, err := sendData(endpoint, body)
 	end := time.Now()
 
+	var algorithm *time.Duration
+	if err == nil {
+		var timingErr error
+		algorithm, timingErr = responseAlgorithmTiming(resp, end.Sub(start))
+		if timingErr != nil {
+			logger.Sugar().Warnw("Ignoring invalid sidecar timing", "participant", participant, "error", timingErr)
+		}
+	}
 	p.mu.Lock()
 	p.calls = append(p.calls, callTiming{
 		participant: participant,
@@ -52,9 +67,67 @@ func (p *phaseRecorder) send(participant, endpoint string, body []byte) (string,
 		bytesSent:   len(body),
 		bytesRecv:   len(resp),
 		failed:      err != nil,
+		algorithm:   algorithm,
 	})
 	p.mu.Unlock()
 	return resp, err
+}
+
+func responseAlgorithmTiming(body string, roundTrip time.Duration) (*time.Duration, error) {
+	var response struct {
+		Metadata map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal([]byte(body), &response); err != nil {
+		return nil, fmt.Errorf("decode timing metadata: %w", err)
+	}
+	raw, ok := response.Metadata[lib.AlgorithmTimingMetadataKey]
+	if !ok {
+		return nil, nil
+	}
+	ms, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(ms) || math.IsInf(ms, 0) || ms < 0 || ms > float64(roundTrip)/float64(time.Millisecond) {
+		return nil, fmt.Errorf("algorithm duration %q is not within the round trip", raw)
+	}
+	duration := time.Duration(ms * float64(time.Millisecond))
+	return &duration, nil
+}
+
+// Sums describe measured calls only; coverage prevents missing data looking like zero.
+type communicationTiming struct {
+	measured      int
+	unmeasured    int
+	roundTrip     time.Duration
+	algorithm     time.Duration
+	communication time.Duration
+}
+
+func (t *communicationTiming) addCall(c callTiming) {
+	if c.failed || c.algorithm == nil {
+		t.unmeasured++
+		return
+	}
+	t.measured++
+	t.roundTrip += c.duration
+	t.algorithm += *c.algorithm
+	t.communication += c.duration - *c.algorithm
+}
+
+func (t *communicationTiming) add(other communicationTiming) {
+	t.measured += other.measured
+	t.unmeasured += other.unmeasured
+	t.roundTrip += other.roundTrip
+	t.algorithm += other.algorithm
+	t.communication += other.communication
+}
+
+func (t communicationTiming) report(summary map[string]any) {
+	summary["measured_calls"] = t.measured
+	summary["unmeasured_calls"] = t.unmeasured
+	if t.measured > 0 {
+		summary["algorithm_ms"] = toMs(t.algorithm)
+		summary["communication_ms"] = toMs(t.communication)
+		summary["measured_round_trip_ms"] = toMs(t.roundTrip)
+	}
 }
 
 func (p *phaseRecorder) finish() {
@@ -74,6 +147,7 @@ type participantTotals struct {
 	failures  int
 	bytesSent int
 	bytesRecv int
+	timing    communicationTiming
 }
 
 // perParticipant merges retried calls to the same participant.
@@ -89,6 +163,7 @@ func (p *phaseRecorder) perParticipant() map[string]*participantTotals {
 		t.attempts++
 		t.bytesSent += c.bytesSent
 		t.bytesRecv += c.bytesRecv
+		t.timing.addCall(c)
 		if c.failed {
 			t.failures++
 		}
@@ -120,6 +195,7 @@ func (p *phaseRecorder) summary() map[string]any {
 	calls := map[string]any{}
 	var bytesSent, bytesRecv int
 	var slowest, fastest time.Duration
+	var timing communicationTiming
 	first := true
 	for name, t := range totals {
 		call := map[string]any{
@@ -133,6 +209,8 @@ func (p *phaseRecorder) summary() map[string]any {
 		if t.failures > 0 {
 			call["failures"] = t.failures
 		}
+		t.timing.report(call)
+		timing.add(t.timing)
 		calls[name] = call
 
 		bytesSent += t.bytesSent
@@ -146,7 +224,7 @@ func (p *phaseRecorder) summary() map[string]any {
 		first = false
 	}
 
-	return map[string]any{
+	summary := map[string]any{
 		"duration_ms":     toMs(p.duration()),
 		"barrier_wait_ms": toMs(barrierWait(totals)),
 		"spread_ms":       toMs(slowest - fastest),
@@ -154,6 +232,8 @@ func (p *phaseRecorder) summary() map[string]any {
 		"bytes_received":  bytesRecv,
 		"calls":           calls,
 	}
+	timing.report(summary)
+	return summary
 }
 
 // runTimingTotals accumulates per-round values into run-level metadata.
@@ -165,6 +245,7 @@ type runTimingTotals struct {
 	coordinationOverhead time.Duration
 	bytesSent            int
 	bytesRecv            int
+	timing               communicationTiming
 }
 
 // roundTiming summarises one round: wall time, policy (reasoning) check,
@@ -173,6 +254,8 @@ func roundTiming(round, policyCheck time.Duration, phases []*phaseRecorder, tota
 	phaseSummaries := map[string]any{}
 	phaseOrder := make([]string, 0, len(phases))
 	active := map[string]time.Duration{}
+	participantTimings := map[string]communicationTiming{}
+	var timing communicationTiming
 	var phaseSum, wait time.Duration
 	var bytesSent, bytesRecv int
 
@@ -182,6 +265,10 @@ func roundTiming(round, policyCheck time.Duration, phases []*phaseRecorder, tota
 		wait += barrierWait(perParticipant)
 		for name, t := range perParticipant {
 			active[name] += t.duration
+			pt := participantTimings[name]
+			pt.add(t.timing)
+			participantTimings[name] = pt
+			timing.add(t.timing)
 			bytesSent += t.bytesSent
 			bytesRecv += t.bytesRecv
 		}
@@ -196,10 +283,12 @@ func roundTiming(round, policyCheck time.Duration, phases []*phaseRecorder, tota
 	sort.Strings(names)
 	participants := map[string]any{}
 	for _, name := range names {
-		participants[name] = map[string]any{
+		participant := map[string]any{
 			"active_ms": toMs(active[name]),
 			"idle_ms":   toMs(round - active[name]),
 		}
+		participantTimings[name].report(participant)
+		participants[name] = participant
 	}
 
 	overhead := round - policyCheck - phaseSum
@@ -209,9 +298,10 @@ func roundTiming(round, policyCheck time.Duration, phases []*phaseRecorder, tota
 		totals.coordinationOverhead += overhead
 		totals.bytesSent += bytesSent
 		totals.bytesRecv += bytesRecv
+		totals.timing.add(timing)
 	}
 
-	return map[string]any{
+	summary := map[string]any{
 		"round_ms":                 toMs(round),
 		"policy_check_ms":          toMs(policyCheck),
 		"coordination_overhead_ms": toMs(overhead),
@@ -222,6 +312,8 @@ func roundTiming(round, policyCheck time.Duration, phases []*phaseRecorder, tota
 		"phases":                   phaseSummaries,
 		"participants":             participants,
 	}
+	timing.report(summary)
+	return summary
 }
 
 func toMs(d time.Duration) float64 {

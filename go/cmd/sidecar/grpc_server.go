@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Jorrit05/DYNAMOS/pkg/lib"
 	pb "github.com/Jorrit05/DYNAMOS/pkg/proto"
@@ -37,10 +38,11 @@ type serverInstance struct {
 	pb.UnimplementedRabbitMQServer
 	pb.UnimplementedEtcdServer
 	pb.UnimplementedMicroserviceServer
-	consumerManager *ConsumerManager
-	channel         *amqp.Channel
-	conn            *amqp.Connection
-	routingKey      string
+	consumerManager  *ConsumerManager
+	channel          *amqp.Channel
+	conn             *amqp.Connection
+	routingKey       string
+	algorithmTimings algorithmTimings
 }
 
 func (s *serverInstance) InitRabbitMq(ctx context.Context, in *pb.InitRequest) (*emptypb.Empty, error) {
@@ -181,6 +183,7 @@ func (s *serverInstance) Consume(in *pb.ConsumeRequest, stream pb.RabbitMQ_Consu
 //   - ContinueReceiving: A boolean indicating if the sidecar should continue receiving messages
 //   - error: An error if the function fails
 func (s *serverInstance) SendData(ctx context.Context, data *pb.MicroserviceCommunication) (*pb.ContinueReceiving, error) {
+	s.algorithmTimings.finish(data, time.Now())
 	logger.Sugar().Debugf("Starting (to AMQ) lib.SendData: %v", data.RequestMetadata.DestinationQueue)
 
 	ctx, span, err := lib.StartRemoteParentSpan(ctx, "sidecar SendData/func:", data.Traces)

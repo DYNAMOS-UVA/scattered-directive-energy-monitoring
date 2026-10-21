@@ -2,8 +2,9 @@
 
 This document describes the timing metrics exported by the API gateway in VFL
 scenario results such as `results/vfl-scenarios/S1-*.json`. It also records the
-planned sidecar extension for separating algorithm computation from
-communication. The sidecar extension is **planned, not implemented**.
+sidecar measurement of algorithm-chain elapsed time and the gateway's estimate
+of communication and middleware delay. New measurements require updated job
+sidecars and an updated API gateway; older result files are unchanged.
 
 ## Measurement model
 
@@ -15,10 +16,11 @@ The API gateway coordinates every VFL phase, so it measures:
 - policy-check (reasoning) time;
 - idle time and synchronisation (barrier) waiting.
 
-All current values use the **API gateway clock**, indicated by
-`"clock": "api-gateway"`. Durations are calculated from Go's monotonic clock and
-reported in milliseconds with microsecond precision. Clock skew between nodes
-therefore does not affect current metrics.
+Gateway durations use the **API gateway clock**, indicated by
+`"clock": "api-gateway"`. Algorithm durations use the job sidecar's own monotonic
+clock. Only elapsed durations are exchanged, never cross-node timestamps.
+Values exported by the gateway are in milliseconds with microsecond precision.
+Cross-node clock offsets therefore do not affect these measurements.
 
 A gateway round trip includes:
 
@@ -124,9 +126,9 @@ VFL-specific phase structure.
 
 ## Interpretation notes
 
-1. **Communication cost is not yet separated from computation.** Each
-   `duration_ms` and `active_ms` value includes both. Planned sidecar metrics
-   will expose that split.
+1. **Round trips still include both processing and communication.** Each
+   `duration_ms` and `active_ms` value includes both. Optional sidecar metrics
+   below expose a split for calls with valid measurements.
 2. **Byte counts are application payload sizes.** They are HTTP JSON body sizes
    seen by the gateway, not network bytes. They exclude HTTP headers and
    RabbitMQ framing. They also do not measure internal hops, such as agent to
@@ -148,15 +150,17 @@ VFL-specific phase structure.
 7. **Barrier wait measures synchronisation, not total idle time.**
    `barrier_wait_ms` captures waiting for the slowest participant in a parallel
    phase. `idle_ms` also includes sequential phases, such as clients waiting
-   while the server aggregates.
+   while the server aggregates. These are gateway-observed scheduling proxies,
+   not measurements of CPU inactivity at the participants.
 
-## Planned sidecar metrics
+## Sidecar communication metrics
 
-> **Status: planned, not implemented.** No sidecar code has changed yet.
+Implemented in the sidecar and gateway source. Deploy both updated images to
+collect the new measurements.
 
 ### Goal
 
-Split each gateway call into:
+Split each successfully measured gateway call into:
 
 ```text
 round_trip_ms = algorithm_ms + communication_ms
@@ -169,8 +173,11 @@ where:
 - `communication_ms` is the rest of the gateway round trip: gateway–agent HTTP,
   agent/sidecar forwarding, RabbitMQ, network transport, and the return path.
 
-This enables comparing communication delay across algorithms and deployment
-locations while keeping algorithm computation separate.
+This enables comparing communication and middleware delay across algorithms and
+deployment locations. `algorithm_ms` is elapsed request handling, not CPU time:
+it includes local gRPC, serialization, model loading, sleeps, and any I/O or
+waiting performed inside the algorithm chain. It does not prove pure compute
+time or pure network latency.
 
 ### Measurement points
 
@@ -178,76 +185,144 @@ Use timestamps from the same job-pod sidecar only:
 
 1. **Handoff:** in
    [`ChainConsume`](../../go/cmd/sidecar/rabbit_ms_chain.go), immediately
-   before calling `msClient.SendData`, write the sidecar receipt timestamp to
-   message metadata.
+   before calling `msClient.SendData`, store `time.Now()` in a sidecar-local map.
+   Pass a unique `dynamos_algorithm_timing_token` through message metadata.
+   The stored Go time retains its monotonic component.
 2. **Reply received:** at the start of the sidecar
    [`SendData`](../../go/cmd/sidecar/grpc_server.go) handler, **before**
    publishing to RabbitMQ, calculate the elapsed time and write it to
    `metadata["dynamos_algorithm_ms"]`.
-3. **Cleanup:** remove the handoff timestamp before publishing, so only the
-   derived duration leaves the pod.
+3. **Cleanup:** delete the token and local timer on completion. Also discard
+   timers when the synchronous chain RPC returns without a reply or with an
+   error. No unbounded history of completed requests is retained.
 
 The second stamp must be taken before publishing because
 `msClient.SendData` blocks while the algorithm runs and publishes its reply.
 Timing around that outer call would include RabbitMQ publishing.
 
-`algorithm_ms` includes the algorithm or service chain and local gRPC
-handoff inside the pod, normally a few milliseconds. It contains no
-cross-node network or RabbitMQ time. The handoff and reply stamps come
-from the same pod and process, so cross-node clock skew does not affect
-it.
+Both measurements are in the same sidecar process. The interval ends before
+RabbitMQ publishing, so publish and subsequent transport remain in the
+communication remainder. Any communication initiated by the algorithm itself
+inside the measured interval remains part of `algorithm_ms`.
 
-### Planned gateway reporting
+### Gateway reporting
 
 The agent already returns the complete `MicroserviceCommunication` JSON,
 including `metadata`, to the gateway. The gateway can read
-`dynamos_algorithm_ms` and add these optional fields:
+`dynamos_algorithm_ms` and add these fields:
 
-| Location | Planned field | Meaning |
+| Location | Field | Meaning |
 |---|---|---|
-| `calls.<participant>` | `algorithm_ms` | Total sidecar-measured algorithm time for that participant in the phase. |
-| `calls.<participant>` | `communication_ms` | `duration_ms - algorithm_ms`; communication and middleware time. |
+| `calls.<participant>` | `algorithm_ms` | Sum of valid sidecar durations for measured attempts to this participant. |
+| `calls.<participant>` | `communication_ms` | Measured round trips minus their algorithm durations; communication and middleware time. |
 | Phase summary | `algorithm_ms`, `communication_ms` | Totals across participants in the phase. |
 | `participants.<name>` | `algorithm_ms`, `communication_ms` | Round totals for each participant. |
 | Round and run timing | `algorithm_ms`, `communication_ms` | Totals for comparing algorithms and deployments. |
 
-If a response lacks the metadata key, the gateway should omit the new fields
-rather than report zero. Existing timing fields remain unchanged.
+Each call, phase, participant, round, and run summary also exports:
 
-The planned name is `communication_ms`, but it means communication **and
+| Field | Meaning |
+|---|---|
+| `measured_calls` | Number of successful call attempts with valid sidecar timing. |
+| `unmeasured_calls` | Number of attempts with missing or invalid timing, or an HTTP/transport failure. Retries count as separate attempts. |
+| `measured_round_trip_ms` | Sum of gateway round trips for measured attempts only. Present when `measured_calls > 0`. |
+
+`algorithm_ms` and `communication_ms` are omitted when no attempts were
+measured. Missing timing is never inferred as zero. Negative, non-finite,
+malformed, or longer-than-round-trip algorithm durations are rejected with a
+gateway warning; response forwarding and existing metrics still work.
+
+For partial coverage, these totals cover **only measured attempts**. In
+particular, do not subtract `algorithm_ms` from a call's full `duration_ms` when
+some retry attempts were unmeasured. Instead:
+
+```text
+algorithm_ms + communication_ms = measured_round_trip_ms
+```
+
+Allow up to 0.002 ms difference from exported rounding. Phase, round, and run
+totals sum call durations across participants; parallel calls overlap, so these
+are participant-milliseconds, not wall-clock phase or training time. Do not add
+these totals to barrier wait or policy time to reconstruct `rounds_ms`.
+Warm-up and shutdown summaries have their own metrics, excluded from run
+training totals, just like the existing byte counters.
+
+The name is `communication_ms`, but it means communication **and
 middleware** time, not pure network latency.
 
 ### Compatibility and impact
 
 - **Long-running sidecars:** agents, orchestrator, policy enforcer, and API
-  gateway do not use the job-chain `ChainConsume` path, so their behaviour is
-  unaffected.
+  gateway do not start timers through the job-chain `ChainConsume` path.
+  Messages without a local timing token are forwarded unchanged by `SendData`.
 - **Job pods:** all job-pod sidecars use the changed code. Adding keys to
   `MicroserviceCommunication.metadata` (`map<string, string>`) is
   backward-compatible and requires no protobuf changes.
 - **Algorithms:** no changes are required when an algorithm returns the
   received message through the DYNAMOS Python library
   `send_data(msComm, data, metadata)`; it preserves existing metadata. A
-  service that builds a new message instead will produce no measurement,
-  without failing.
+  service that discards the token will produce no measurement, without
+  failing. No algorithm or agent image rebuild is required.
 - **Multi-service chains:** the first service receives from the sidecar,
   and the last service returns through the sidecar. The value covers the
-  whole chain, not one service.
-- **Agents:** no rebuild is needed. Agents create job sidecars using
-  `dynamos1/sidecar:${SIDECAR_TAG}`, falling back to `latest`. Deploy a
-  dedicated sidecar tag and set `SIDECAR_TAG` in the agent charts, rather
-  than overwriting the shared `latest` image.
+  whole synchronous, in-pod chain, not one service. Legacy streaming consumers
+  are not measured. Asynchronous replies after the handoff RPC has returned
+  are not measured, and unmatched tokens are removed with a warning.
+- **Rollout:** there is one sidecar image for every component. The timing code
+  is inert outside the job-chain path, so the same new image can run next to
+  the agents, orchestrator, policy enforcer, API gateway, and job pods. Do not
+  deploy different sidecar versions per component.
 
+### Deploying
+
+Every sidecar, including those of the agents, orchestrator, policy enforcer,
+API gateway, and job pods, must run the same image. No chart or agent needs
+a sidecar-specific setting. Chart-managed sidecars use
+`sidecar:<branchNameTag>` of their chart, and job-pod sidecars use
+`sidecar:latest` (the agent default when `SIDECAR_TAG` is unset). Therefore,
+all charts must resolve to the same sidecar tag, which is `latest`:
+
+1. Build and push from this branch (the Makefile tags each image with both the
+   branch name and `latest`):
+
+   ```bash
+   cd go
+   make sidecar api-gateway orchestrator policy-enforcer
+   ```
+
+   The agent image does not change, so `agent:latest` is reused. The
+   policy enforcer built from this branch serves `/api/v1/readyz`.
+2. Deploy the orchestrator chart with `latest` instead of `baseline-eflint-2`
+   (`ORCHESTRATOR_IMAGE_TAG=latest`). Otherwise, the orchestrator and policy
+   enforcer keep the old `sidecar:baseline-eflint-2`, which is a different
+   sidecar version.
+3. Restart the long-running pods. The API gateway and orchestrator charts use
+   `imagePullPolicy: Always`. The agent charts use `IfNotPresent`, so a node
+   that has an old `sidecar:latest` cached keeps it after a restart. Pull
+   the new image on every node first (on Docker Desktop, the local `make` build
+   already updates it). Job pods use the Kubernetes default for `:latest`,
+   which is `Always`. New job pods get the new sidecar, while running jobs
+   keep their old image.
+4. Verify that all sidecar containers run the same image digest, then run a
+   scenario and check `measured_calls` coverage.
+
+Pushing `latest` overwrites the shared `dynamos1/*:latest` tags. To avoid this,
+build **all** images, including the agent, under one dedicated tag and
+install every chart with that `branchNameTag`. Because the agent sets no
+`SIDECAR_TAG`, job pods would still use `sidecar:latest`. Therefore, push the
+sidecar under that tag and also as `latest`, or set `SIDECAR_TAG` to the same
+tag for every agent.
 ### Validation plan
 
-1. Add Go unit tests for stamping, duration calculation, cleanup,
-   missing or malformed metadata, and preserving existing metadata.
-2. Add gateway tests for reading the value, omitting missing values,
-   calculating totals, and preventing negative `communication_ms`.
-3. Run S1 locally and check that, for each call,
-   `algorithm_ms + communication_ms = duration_ms`.
-4. Repeat S1 across deployment configurations. Expect `algorithm_ms` to
-   stay comparable while `communication_ms` reflects the changed placement.
+1. Unit tests cover protobuf metadata preservation, concurrent requests,
+   per-call cleanup, missing/unknown tokens, and forwarding errors.
+2. Gateway tests cover validation, missing data, zero measurements, retries,
+   coverage counts, aggregation, and HTTP response integration.
+3. After deploying, run S1 and check measurement coverage and
+   `algorithm_ms + communication_ms = measured_round_trip_ms`.
+4. Repeat S1 across deployment configurations. Compare compute resources too:
+   algorithm elapsed time can change with CPU contention or different hardware.
+   End-to-end cluster validation is separate from the local tests.
 
 ### Remaining limitations
 
@@ -256,6 +331,46 @@ middleware** time, not pure network latency.
 - Policy reasoning remains combined with policy messaging.
 - The VFL client shutdown timeout must be fixed before `total_ms` is a
   reliable deployment comparison metric.
+
+## Plotting exported results
+
+The helper [`plot_vfl_timing.py`](../../plots/plot_vfl_timing.py) creates a
+four-panel PNG focused on the main performance metrics: round wall time split
+into training, policy checks, and gateway coordination; measured algorithm
+versus communication-and-middleware time; synchronization wait; and gateway
+payload bytes. It excludes approval, warm-up, and shutdown.
+
+Install Matplotlib once and plot a result from the repository root:
+
+```bash
+python3 -m pip install -r plots/requirements.txt
+python3 plots/plot_vfl_timing.py \
+  results/vfl-scenarios/S1-20261021-162842.json
+```
+
+The PNG is written to `results/vfl-scenarios/plots/`, which is gitignored.
+For a steady-state view that omits the first round (which may include
+initialization), add `--skip-rounds 1`. To compare runs, provide multiple JSON
+files and an optional label for each:
+
+```bash
+python3 plots/plot_vfl_timing.py local.json distributed.json \
+  --labels Local Distributed --skip-rounds 1
+```
+
+This writes one dashboard per run and a `comparison.png`. Comparison charts
+show average round metrics and average measured-call times; use runs with
+matching algorithms, participant counts, batch sizes, and policy-check
+intervals. The communication and synchronization metrics sum participant
+times and are **not** additive components of wall time. Communication includes
+middleware and queueing, while payload sizes count gateway request/response
+bodies rather than all network traffic. Missing sidecar measurements are
+labelled unavailable; partial coverage is shown and reported as a warning.
+The script and its tests are in `plots/`; run them with:
+
+```bash
+python3 -m unittest discover -s plots -p test_plot_vfl_timing.py
+```
 
 ## Source references
 

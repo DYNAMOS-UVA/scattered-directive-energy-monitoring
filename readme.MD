@@ -42,6 +42,18 @@ The policy enforcer evaluates the agreement together with shared eFLINT rules an
 
 The commands below were tested from a WSL terminal on Windows.
 
+### Line endings on Windows / WSL
+
+Bash scripts must use **LF**, not Windows **CRLF** line endings. CRLF can cause
+`$'\r': command not found` and misleading `No such file or directory` errors.
+The repository's `.gitattributes` enforces LF for shell scripts, configuration,
+and Linux build inputs, including when Git uses `core.autocrlf=true`.
+
+The VS Code workspace setting `files.eol` is already set to `\n` (LF) for new
+files. For an existing CRLF file, click **CRLF** in the bottom-right status bar,
+select **LF**, and save. `.editorconfig` supplies the same default to compatible
+editors. No global VS Code or Git setting change is required.
+
 The scenario scripts are in the repository's `scripts/` directory. The policy models are stored and updated through the policy-enforcer/orchestrator path; the repository copies of `.eflint` files are not modified by a normal scenario run.
 
 ### Install DYNAMOS

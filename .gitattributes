@@ -1,1 +1,17 @@
 * text=auto
+
+# Linux/WSL scripts and build inputs must retain LF on Windows checkouts.
+*.sh text eol=lf
+*.bash text eol=lf
+*.conf text eol=lf
+.env text eol=lf
+.env.* text eol=lf
+Makefile text eol=lf
+Makefile.* text eol=lf
+Makefile_* text eol=lf
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+
+.gitattributes text eol=lf
+.editorconfig text eol=lf
+.vscode/settings.json text eol=lf

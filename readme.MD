@@ -64,6 +64,26 @@ For a lightweight local demonstration without monitoring:
 bash ./configuration/dynamos-configuration-no-monitoring.sh local
 ```
 
+Both installation scripts use `ORCHESTRATOR_IMAGE_TAG` from `dynamos.conf`,
+defaulting to `baseline-eflint-2`, for the orchestrator chart's `orchestrator`,
+`policy-enforcer`, and `sidecar` images. The agents and API gateway charts
+keep their existing `latest` default; no agent image rebuild is needed.
+The tag can be overridden through the environment before running an installer.
+
+To update only the orchestrator release in an existing local installation,
+run these commands from the repository root (the release is in `default`,
+while its workloads are in `orchestrator`):
+
+```bash
+source ./dynamos.conf
+helm upgrade orchestrator ./charts/orchestrator --namespace default --reuse-values \
+  --set-string "dockerArtifactAccount=${DOCKERHUB_ACCOUNT}" \
+  --set-string "branchNameTag=${ORCHESTRATOR_IMAGE_TAG}"
+kubectl -n orchestrator rollout status deployment/policy-enforcer --timeout=300s
+kubectl -n orchestrator rollout status deployment/orchestrator --timeout=300s
+kubectl -n orchestrator get pods
+```
+
 ### Uninstall DYNAMOS
 
 ```bash
@@ -89,6 +109,25 @@ kubectl -n orchestrator port-forward svc/orchestrator 18082:8080
 ## Tests
 
 The scenario scripts submit a VFL request, query the policy enforcer at the configured policy-check interval, and store a final JSON result. The result contains a status and, for each executed training round, the number of participating clients.
+
+### Timing and communication metrics
+
+The API gateway drives every phase of a round, so it records timings from its own
+(single, monotonic) clock. Each `results[i].timing` contains:
+
+| Field | Meaning |
+|---|---|
+| `round_ms` | Wall time of the round, including its policy check. |
+| `policy_check_ms` | Policy re-verification (reasoning) before the round; 0 when no check ran. |
+| `phases.<name>` | `client_forward`, `server_aggregate`, `client_update`: wall time, `barrier_wait_ms`, `spread_ms`, bytes, and per-participant round trips (`calls`). |
+| `barrier_wait_ms` | Synchronisation cost: summed time participants that finished a parallel phase early waited for the slowest one. |
+| `coordination_overhead_ms` | Gateway work between phases (round − policy check − phases). |
+| `participants.<name>` | `active_ms` (own round trips) and `idle_ms` (rest of the round). |
+
+`metadata.timing` aggregates the run: `approval_ms` (initial approval and job
+composition), `warmup` (ping phase), summed round/policy/barrier/overhead times,
+total bytes, `shutdown`, and `total_ms`. A round trip includes transport, queueing
+and compute; the gateway cannot separate them.
 
 ### Timeline legend
 

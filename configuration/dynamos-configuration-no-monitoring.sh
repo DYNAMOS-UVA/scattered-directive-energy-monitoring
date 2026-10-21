@@ -92,7 +92,7 @@ helm upgrade -i -f ${core_chart}/values.yaml core ${core_chart} --set hostPath=$
 sleep 3
 
 echo -e "\nInstalling orchestrator layer...\n"
-helm upgrade -i -f ${orchestrator_chart}/values.yaml orchestrator ${orchestrator_chart} --set dockerArtifactAccount=${DOCKERHUB_ACCOUNT}
+helm upgrade -i -f ${orchestrator_chart}/values.yaml orchestrator ${orchestrator_chart} --set dockerArtifactAccount=${DOCKERHUB_ACCOUNT} --set-string branchNameTag="${ORCHESTRATOR_IMAGE_TAG}"
 
 if [ "$1" == "local" ]; then
     echo "Transferring local etcd_launch_files..."

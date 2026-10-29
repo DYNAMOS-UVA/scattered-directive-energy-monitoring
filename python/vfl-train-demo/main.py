@@ -217,6 +217,7 @@ def request_handler(msComm: msCommTypes.MicroserviceCommunication,
             elif request.type == "vflShutdownRequest":
                 logger.info(
                     "Received vflShutdownRequest, shutting down service.")
+                ms_config.next_client.ms_comm.send_data(msComm, msComm.data, {})
                 signal_continuation(stop_event, stop_microservice_condition)
 
             elif request.type == "vflPingRequest":

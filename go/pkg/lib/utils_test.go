@@ -54,6 +54,25 @@ func TestGenerateGuid(t *testing.T) {
 	}
 }
 
+func TestGenerateJobNameUsernames(t *testing.T) {
+	for _, tc := range []struct {
+		username string
+		prefix   string
+	}{
+		{"requestor", "requestor"},
+		{"example.two@cloud.com", "example-two"},
+		{"Jorrit", "jorrit"},
+		{"-Example Two-", "example-two"},
+	} {
+		t.Run(tc.username, func(t *testing.T) {
+			name := GenerateJobName(tc.username, 8)
+			if !strings.HasPrefix(name, tc.prefix+"-") || len(name) != len(tc.prefix)+9 {
+				t.Fatalf("unexpected generated job name %q for %q", name, tc.username)
+			}
+		})
+	}
+}
+
 func TestLastPartAfterSlash(t *testing.T) {
 	tests := []struct {
 		input    string

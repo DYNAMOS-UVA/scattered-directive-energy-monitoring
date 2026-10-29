@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -158,6 +159,7 @@ func requestHandler() http.HandlerFunc {
 }
 
 func startTraining(protoRequest *pb.RequestApproval, dataRequestInterface map[string]any, apiReqApproval api.RequestApproval, r *http.Request, requestID string) {
+	approvalStart := time.Now()
 	logger.Debug("Starting training process...")
 	// Requests may take up to 10 minutes now
 	ctxWithTimeout, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -195,13 +197,14 @@ func startTraining(protoRequest *pb.RequestApproval, dataRequestInterface map[st
 		}
 		dataRequestInterface["requestMetadata"] = requestMetadata
 
-		logger.Sugar().Infof("Data Prepared jsonData: %s", dataRequestInterface)
+		logger.Sugar().Infow("Request approved", "request_id", requestID,
+			"job_id", msg.JobId, "providers", len(msg.AuthorizedProviders))
 
 		var response []byte
 
 		if apiReqApproval.Type == "vflTrainModelRequest" {
 			ctxWithoutCancel := context.WithoutCancel(r.Context())
-			response = runVFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId, ctxWithoutCancel, requestID)
+			response = runVFLTraining(dataRequestInterface, msg.AuthorizedProviders, msg.JobId, ctxWithoutCancel, requestID, time.Since(approvalStart))
 
 		} else {
 			// Marshal the combined data back into JSON for forwarding
@@ -217,7 +220,7 @@ func startTraining(protoRequest *pb.RequestApproval, dataRequestInterface map[st
 		// w.WriteHeader(http.StatusOK)
 		// w.Write(response)
 		logger.Sugar().Info("Training process completed for request id: ", requestID)
-		logger.Sugar().Info("Response: ", string(response))
+		logger.Sugar().Infow("Training response ready", "request_id", requestID, "response_bytes", len(response))
 		return
 
 	case <-ctx.Done():
@@ -227,35 +230,46 @@ func startTraining(protoRequest *pb.RequestApproval, dataRequestInterface map[st
 
 }
 
-func runVFLTrainingRound(dataRequest map[string]any, clients []ClientData, serverAuth string, serverUrl string, learning_rate float64, trainingBacktrack int64, communication_frequency int64, sample_batch_size int64) ([]float64, error) {
+func runVFLTrainingRound(dataRequest map[string]any, clients []ClientData, serverAuth string, serverUrl string, learning_rate float64, trainingBacktrack int64, communication_frequency int64, sample_batch_size int64, phases *[]*phaseRecorder) ([]float64, error) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	responses := map[string]string{}
 	var existingError error = nil
-	var sample_batch_indexes string
 	formattedEndpoint := "http://%s:8080/agent/v1/vflTrainRequest/%s"
 
 	serverTarget := strings.ToLower(serverAuth)
 	serverEndpoint := fmt.Sprintf(formattedEndpoint, serverUrl, serverTarget)
+	newPhase := func(name string) *phaseRecorder {
+		phase := startPhase(name)
+		*phases = append(*phases, phase)
+		return phase
+	}
 
 	// Step 1: Send server for sample
 	logger.Sugar().Info("[SERVER] [vflSampleBatchRequest] Requesting mini-batch samples")
-	dataRequest["type"] = "vflSampleBatchRequest"
-	dataRequest["data"] = map[string]any{
+	sample := newPhase("server_sample")
+	sampleRequest := trainingPhaseRequest(dataRequest, "vflSampleBatchRequest", map[string]any{
 		"sample_batch_size": sample_batch_size,
-	}
+	})
 
-	responseData, err := sendRequest(serverEndpoint, dataRequest)
+	responseData, err := sendRequest(sample, serverTarget, serverEndpoint, sampleRequest)
+	sample.finish()
 
 	if err != nil {
-		logger.Sugar().Errorf("Error sending data, %v", err)
-	} else {
-		sample_batch_indexes = responseData.Data.AsMap()["sample_batch_indexes"].(string)
+		return nil, err
+	}
+	sample_batch_indexes, ok := responseData.GetData().AsMap()["sample_batch_indexes"].(string)
+	if !ok || sample_batch_indexes == "" {
+		return nil, fmt.Errorf("server response is missing sample_batch_indexes")
 	}
 
 	logger.Sugar().Info("[SERVER] [vflSampleBatchRequest] Response OK")
 
 	// Step 2: Send the samples to clients to get the intermediate embeddings.
+	forward := newPhase("client_forward")
+	forwardRequest := trainingPhaseRequest(dataRequest, "vflTrainRequest", map[string]any{
+		"sample_batch_indexes": sample_batch_indexes,
+	})
 	for _, client := range clients {
 		auth := client.Auth
 		url := client.Url
@@ -273,14 +287,11 @@ func runVFLTrainingRound(dataRequest map[string]any, clients []ClientData, serve
 		endpoint := fmt.Sprintf(formattedEndpoint, url, target)
 
 		go func() {
-			dataRequest["type"] = "vflTrainRequest"
-			dataRequest["data"] = map[string]any{
-				"sample_batch_indexes": sample_batch_indexes,
-			}
-
-			responseData, err := sendRequest(endpoint, dataRequest)
+			responseData, err := sendRequest(forward, target, endpoint, forwardRequest)
 			if err != nil {
+				mu.Lock()
 				existingError = err
+				mu.Unlock()
 				logger.Sugar().Errorf("Error sending data, %v", err)
 			} else {
 				dataJson := responseData.Data.AsMap()
@@ -288,8 +299,9 @@ func runVFLTrainingRound(dataRequest map[string]any, clients []ClientData, serve
 
 				if !ok {
 					logger.Sugar().Error("No embeddings found in the return data.")
-					embeddings = ""
-					// TODO: Handle disagreements?
+					mu.Lock()
+					existingError = fmt.Errorf("no embeddings in response from %s", target)
+					mu.Unlock()
 				}
 
 				mu.Lock()
@@ -303,6 +315,7 @@ func runVFLTrainingRound(dataRequest map[string]any, clients []ClientData, serve
 	}
 
 	wg.Wait()
+	forward.finish()
 
 	if existingError != nil {
 		return []float64{}, existingError
@@ -311,8 +324,7 @@ func runVFLTrainingRound(dataRequest map[string]any, clients []ClientData, serve
 	logger.Sugar().Info("[SERVER] [vflAggregateRequest] Sending the embeddings to server to calculate gradients")
 
 	// Collect embeddings from all clients
-	// There is a major bug here with the ordering and the way server receives the embeddings.
-	logger.Sugar().Info("[SERVER] Check embeddings ordering")
+	// Keep embedding and returned-gradient positions aligned with the client list.
 	embeddingList := []string{}
 	for _, client := range clients {
 		if emb, ok := responses[strings.ToLower(client.Auth)]; ok {
@@ -322,16 +334,17 @@ func runVFLTrainingRound(dataRequest map[string]any, clients []ClientData, serve
 		logger.Sugar().Debug("Embeddings for: ", client.Auth)
 	}
 
-	logger.Sugar().Debug("The embeddings list: ", embeddingList)
+	logger.Sugar().Debugw("Embeddings collected", "clients", len(embeddingList))
 
 	// Step 3: Send intermediate embeddings to server to calculate gradients
-	dataRequest["type"] = "vflAggregateRequest"
-	dataRequest["data"] = map[string]any{
+	aggregate := newPhase("server_aggregate")
+	aggregateRequest := trainingPhaseRequest(dataRequest, "vflAggregateRequest", map[string]any{
 		"embeddings":        embeddingList,
 		"trainingBacktrack": trainingBacktrack,
-	}
+	})
 
-	serverResponse, err := sendRequest(serverEndpoint, dataRequest)
+	serverResponse, err := sendRequest(aggregate, serverTarget, serverEndpoint, aggregateRequest)
+	aggregate.finish()
 	if err != nil {
 		logger.Sugar().Error("Unmarshalling response did not go well: ", err)
 		return []float64{}, err
@@ -344,12 +357,16 @@ func runVFLTrainingRound(dataRequest map[string]any, clients []ClientData, serve
 	for _, val := range gradientList {
 		gradients = append(gradients, val.GetStringValue())
 	}
+	if len(gradients) != len(clients) {
+		return nil, fmt.Errorf("server returned %d gradients for %d clients", len(gradients), len(clients))
+	}
 
 	logger.Sugar().Info("[SERVER] [vflAggregateRequest] Gradients received OK")
 
 	// Step 4: Given the gradients, the clients perform gradient descent.
-	index := 0
-	for _, client := range clients {
+	// Client descent and server local updates share one parallel barrier.
+	update := newPhase("local_update")
+	for index, client := range clients {
 		auth := client.Auth
 		url := client.Url
 
@@ -359,20 +376,19 @@ func runVFLTrainingRound(dataRequest map[string]any, clients []ClientData, serve
 
 		logger.Sugar().Info("[", target, "] [vflGradientDescentRequest] Perform gradient descent for ", communication_frequency, " times")
 
+		updateRequest := trainingPhaseRequest(dataRequest, "vflGradientDescentRequest", map[string]any{
+			"gradients":               gradients[index],
+			"learning_rate":           learning_rate,
+			"communication_frequency": communication_frequency,
+		})
+
 		go func() {
-			dataRequest["type"] = "vflGradientDescentRequest"
-			dataRequest["data"] = map[string]any{
-				"gradients":               gradients[index],
-				"learning_rate":           learning_rate,
-				"communication_frequency": communication_frequency,
-			}
-
-			index++
-
-			response, err := sendRequest(endpoint, dataRequest)
+			response, err := sendRequest(update, target, endpoint, updateRequest)
 			if err != nil {
+				mu.Lock()
 				existingError = err
-				logger.Sugar().Error("Error sending data, ", err, ", received: ", response)
+				mu.Unlock()
+				logger.Sugar().Errorw("Client update failed", "participant", target, "error", err, "response_received", response != nil)
 			}
 			wg.Done()
 			logger.Sugar().Info("[", target, "] [vflGradientDescentRequest] Response OK")
@@ -384,21 +400,13 @@ func runVFLTrainingRound(dataRequest map[string]any, clients []ClientData, serve
 	logger.Sugar().Info("[SERVER] [vflLocalUpdateRequest] Perform local update for ", communication_frequency, " times")
 
 	// Step 5: Server as well perform local update on its model given the intermediate embeddings.
-	serverDataRequest := map[string]any{}
-
-	// Copy it for now.
-	for key, value := range dataRequest {
-		serverDataRequest[key] = value
-	}
-
-	serverDataRequest["type"] = "vflLocalUpdateRequest"
-	serverDataRequest["data"] = map[string]any{
+	serverDataRequest := trainingPhaseRequest(dataRequest, "vflLocalUpdateRequest", map[string]any{
 		"embeddings":              embeddingList,
 		"trainingBacktrack":       trainingBacktrack,
 		"communication_frequency": communication_frequency,
-	}
+	})
 
-	serverResponse, err = sendRequest(serverEndpoint, serverDataRequest)
+	serverResponse, err = sendRequest(update, serverTarget, serverEndpoint, serverDataRequest)
 	if err != nil {
 		logger.Sugar().Error("Unmarshalling response did not go well: ", err)
 	} else {
@@ -412,12 +420,29 @@ func runVFLTrainingRound(dataRequest map[string]any, clients []ClientData, serve
 	logger.Sugar().Info("[SERVER] [vflLocalUpdateRequest] Response 0K")
 
 	wg.Wait()
+	update.finish()
 
+	if err != nil {
+		return nil, err
+	}
 	if existingError != nil {
 		return []float64{}, existingError
 	}
 
+	if len(accuracies) == 0 {
+		return nil, fmt.Errorf("server local update returned no accuracies")
+	}
 	return accuracies, nil
+}
+
+func trainingPhaseRequest(base map[string]any, requestType string, data map[string]any) map[string]any {
+	request := make(map[string]any, len(base))
+	for key, value := range base {
+		request[key] = value
+	}
+	request["type"] = requestType
+	request["data"] = data
+	return request
 }
 
 func extractValueOrDefault[T ~int64 | ~float64](data map[string]any, propertyName string, defaultValue T) T {
@@ -503,7 +528,9 @@ type ClientData struct {
 	Url  string
 }
 
-func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]string, jobId string, ctx context.Context, requestID string) []byte {
+func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]string, jobId string, ctx context.Context, requestID string, approvalDuration time.Duration) []byte {
+	trainingStart := time.Now()
+	var timingTotals runTimingTotals
 	clients := &[]ClientData{}
 	var serverUrl string
 	var serverAuth string
@@ -536,10 +563,14 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	}
 
 	metadata := map[string]any{
-		"total_rounds":          cycles,
-		"policy_removal":        policy_removal,
-		"training_backtrack":    trainingBacktrack,
-		"policy_reintroduction": policy_reintroduction,
+		"total_rounds":            cycles,
+		"policy_removal":          policy_removal,
+		"training_backtrack":      trainingBacktrack,
+		"policy_reintroduction":   policy_reintroduction,
+		"strategy":                "fed-bcd",
+		"communication_frequency": communication_frequency,
+		"sample_batch_size":       sample_batch_size,
+		"policy_mode":             "event-driven",
 	}
 
 	// logger.Sugar().Debug("metadata: ", metadata)
@@ -575,6 +606,8 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 	}
 
 	var noPing bool = false
+	var pingMutex sync.Mutex
+	warmup := startPhase("warmup")
 
 	for auth, url := range authorizedProviders {
 		wg.Add(1)
@@ -584,14 +617,16 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		go func() {
 			// TODO: Repeat ping until no error, after 5 tries, cancel request
 			for i := range 5 {
-				_, err := sendData(endpoint, dataRequestJson)
+				_, err := warmup.send(target, endpoint, dataRequestJson)
 
 				if err == nil {
 					break
 				}
 
 				if i == 4 {
+					pingMutex.Lock()
 					noPing = true
+					pingMutex.Unlock()
 				}
 			}
 
@@ -599,32 +634,53 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		}()
 	}
 
-	// note: this is likely misplaced, probably needs to be after the wait
+	wg.Wait()
+	warmup.finish()
 	if noPing {
 		logger.Sugar().Error("No ping from a client or the server. Something is wrong.")
+		trainingFailed = true
 	}
-
-	wg.Wait()
 
 	// Checks if policy changes (from incoming messages)
 	checkPolicyUpdate(clients, user)
 
-	iterations := cycles / communication_frequency
+	var iterations int64
+	if communication_frequency <= 0 || cycles <= 0 || sample_batch_size <= 0 {
+		logger.Sugar().Errorw("Invalid FedBCD parameters", "cycles", cycles,
+			"communication_frequency", communication_frequency, "sample_batch_size", sample_batch_size)
+		trainingFailed = true
+	} else {
+		iterations = cycles / communication_frequency
+		if iterations == 0 {
+			logger.Sugar().Error("FedBCD requires at least one synchronization round (cycles >= communication_frequency).")
+			trainingFailed = true
+		}
+	}
+	metadata["synchronization_rounds"] = iterations
+	metadata["scheduled_local_steps"] = iterations * communication_frequency
 	policyRemovalRound := int64(-1)
-	if policy_removal != -1 {
+	if policy_removal != -1 && communication_frequency > 0 {
 		policyRemovalRound = policy_removal / communication_frequency
 	}
 
 	policyReintroductionRound := int64(-1)
-	if policy_reintroduction != -1 {
+	if policy_reintroduction != -1 && communication_frequency > 0 {
 		policyReintroductionRound = policy_reintroduction / communication_frequency
 	}
 
 	logger.Sugar().Info("Running VFL for ", cycles, " rounds")
 	for round := range iterations {
+		if trainingFailed {
+			break
+		}
+		roundStart := time.Now()
+		var phases []*phaseRecorder
 		logger.Sugar().Info("Running VFL training round ", round)
 
 		currentClients := getSafeClients(clients)
+		sort.Slice(currentClients, func(i, j int) bool {
+			return strings.ToLower(currentClients[i].Auth) < strings.ToLower(currentClients[j].Auth)
+		})
 
 		numClients := -1          // default value in case of error
 		metadata_accuracy := -1.0 // default value in case of error
@@ -681,16 +737,18 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		numClients = len(currentClients)
 
 		logger.Sugar().Info("- Sending training request")
-		accuracies, err := runVFLTrainingRound(dataRequest, currentClients, serverAuth, serverUrl, learning_rate, trainingBacktrack, communication_frequency, sample_batch_size)
-		logger.Sugar().Info("- Intermediate accuracy achieved: ", accuracies[len(accuracies)-1], " for round ", round)
-		finalAccuracy = accuracies[len(accuracies)-1]
-		metadata_accuracy = accuracies[len(accuracies)-1] // store accuracy from metadata for results
-
+		accuracies, err := runVFLTrainingRound(dataRequest, currentClients, serverAuth, serverUrl, learning_rate, trainingBacktrack, communication_frequency, sample_batch_size, &phases)
+		timing := roundTiming(time.Since(roundStart), 0, phases, &timingTotals)
 		if err != nil {
-			logger.Sugar().Error("Training round returned an error.")
+			logger.Sugar().Errorw("Training round failed", "round", round, "error", err)
+			metadata["failed_round"] = map[string]any{"train_round": round, "error": err.Error(), "timing": timing}
 			trainingFailed = true
 			break
 		}
+		finalAccuracy = accuracies[len(accuracies)-1]
+		metadata_accuracy = finalAccuracy
+		logger.Sugar().Infow("FedBCD round completed", "round", round,
+			"clients", numClients, "accuracy", finalAccuracy, "round_ms", timing["round_ms"])
 
 		// This has to be changed.
 		result := map[string]any{
@@ -698,6 +756,9 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 			"train_round": round,
 			"accuracy":    metadata_accuracy,
 			"clients":     numClients,
+			"accuracies":  accuracies,
+			"local_steps": communication_frequency,
+			"timing":      timing,
 		}
 		results = append(results, result)
 		v, _ := trainingRequests.Load(requestID)
@@ -723,18 +784,37 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		return []byte{}
 	}
 
+	shutdown := startPhase("shutdown")
 	for auth, url := range authorizedProviders {
 		wg.Add(1)
 		target := strings.ToLower(auth)
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/vflTrainRequest/%s", url, target)
 
 		go func() {
-			sendData(endpoint, dataRequestJson)
+			shutdown.send(target, endpoint, dataRequestJson)
 			wg.Done()
 		}()
 	}
 
 	wg.Wait()
+	shutdown.finish()
+	runSummary := map[string]any{
+		"clock":                    "api-gateway",
+		"approval_ms":              toMs(approvalDuration),
+		"warmup":                   warmup.summary(),
+		"rounds_ms":                toMs(timingTotals.rounds),
+		"policy_check_ms":          toMs(timingTotals.policyChecks),
+		"policy_checks":            timingTotals.policyCheckCount,
+		"barrier_wait_ms":          toMs(timingTotals.barrierWait),
+		"coordination_overhead_ms": toMs(timingTotals.coordinationOverhead),
+		"bytes_sent":               timingTotals.bytesSent,
+		"bytes_received":           timingTotals.bytesRecv,
+		"shutdown":                 shutdown.summary(),
+		"total_ms":                 toMs(approvalDuration + time.Since(trainingStart)),
+	}
+	timingTotals.timing.report(runSummary)
+	metadata["timing"] = runSummary
+	metadata["completed_local_steps"] = int64(len(results)) * communication_frequency
 
 	response := map[string]any{
 		"jobId":    jobId,
@@ -778,26 +858,24 @@ func runVFLTraining(dataRequest map[string]any, authorizedProviders map[string]s
 		return []byte{}
 	}
 
-	logger.Sugar().Info("Training results: ", string(responseJson))
+	logger.Sugar().Infow("Training results ready", "request_id", requestID,
+		"rounds_completed", len(results), "failed", trainingFailed, "result_bytes", len(responseJson))
 	return cleanupAndMarshalResponse(response) // note this is not the same as responseJson
 }
 
 // #region vflTrainModelRequest - Helpers
 
-func sendRequest(endpoint string, dataRequest map[string]any) (*pb.MicroserviceCommunication, error) {
+func sendRequest(phase *phaseRecorder, participant, endpoint string, dataRequest map[string]any) (*pb.MicroserviceCommunication, error) {
 	dataRequestJson, err := json.Marshal(dataRequest)
 	if err != nil {
 		logger.Sugar().Errorf("Error marshalling combined data: %v", err)
 		return nil, err
 	}
 
-	responseData, err := sendData(endpoint, dataRequestJson)
+	responseData, err := phase.send(participant, endpoint, dataRequestJson)
 	if err != nil {
-		logger.Sugar().Errorf("Error sending data to the server, %v", err)
+		return nil, err
 	}
-
-	serverResponse := &pb.MicroserviceCommunication{}
-	err = json.Unmarshal([]byte(responseData), serverResponse)
 
 	responseObj := &pb.MicroserviceCommunication{}
 	if err := json.Unmarshal([]byte(responseData), responseObj); err != nil {
@@ -825,7 +903,7 @@ func sendDataToAuthProviders(dataRequest []byte, authorizedProviders map[string]
 		// Construct the end point
 		endpoint := fmt.Sprintf("http://%s:%s/agent/v1/%s/%s", url, agentPort, msgType, target)
 
-		logger.Sugar().Infof("Sending request to %s.\nEndpoint: %s\nJSON:%v", target, endpoint, string(dataRequest))
+		logger.Sugar().Infow("Sending provider request", "target", target, "endpoint", endpoint, "request_bytes", len(dataRequest))
 
 		// Async call send the data
 		go func() {
@@ -869,6 +947,8 @@ func sendData(endpoint string, jsonData []byte) (string, error) {
 	}
 	body, err := api.PostRequest(endpoint, string(jsonData), headers)
 	if err != nil {
+		logger.Sugar().Errorw("Agent HTTP request failed", "endpoint", endpoint,
+			"request_bytes", len(jsonData), "error", err)
 		return "", err
 	}
 

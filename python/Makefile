@@ -41,9 +41,9 @@ $(targets): proto
 			docker push $(dockerhub_account)/$@:latest; \
 		fi; \
 	else \
-		docker build --platform linux/amd64 --build-arg NAME=$@ --build-arg WHEEL_NAME=$$BASE -t $(dockerhub_account)/$@:latest ./$@/; \
+		docker build --platform linux/amd64 --build-arg NAME=$@ --build-arg WHEEL_NAME=$$BASE -t $(dockerhub_account)/$@:$(branch_name) ./$@/; \
 		if [ "$(PUSH)" = "1" ]; then \
-			docker push $(dockerhub_account)/$@:latest; \
+			docker push $(dockerhub_account)/$@:$(branch_name); \
 		fi; \
 	fi
 	

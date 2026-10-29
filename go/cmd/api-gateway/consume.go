@@ -33,7 +33,9 @@ func handleIncomingMessages(ctx context.Context, grpcMsg *pb.SideCarMessage) err
 			approvalRequest <- validation{response: requestApprovalResponse, localContext: ctx}
 			delete(requestApprovalMap, requestApprovalResponse.User.Id)
 		} else {
-			logger.Sugar().Error("No sessions found for this requestApprovalResponse flow: ", requestApprovalResponse, ", ", requestApprovalMap[requestApprovalResponse.User.Id])
+			logger.Sugar().Errorw("No session for approval response",
+				"user_id", requestApprovalResponse.User.Id, "job_id", requestApprovalResponse.JobId,
+				"type", requestApprovalResponse.Type)
 		}
 		requestApprovalMutex.Unlock()
 	default:

@@ -43,5 +43,5 @@ subjects:
 END
 fi
 
-./scripts/add_namespace.sh $1 $2
+bash ./scripts/add_namespace.sh "$1" "$2"
 }

@@ -1,5 +1,6 @@
 #!/bin/bash
 
+set -e
 # Importing dynamos config
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 source "${SCRIPT_DIR}/../../dynamos.conf"
@@ -15,7 +16,7 @@ echo "Adding agents..."
 for agent in "${agents[@]}"
 do
     echo "- agent '$agent'"
-    ./scripts/add_agent.sh $agent $3
+    bash ./scripts/add_agent.sh "$agent" "$3"
 done
 
 echo ""
@@ -23,6 +24,6 @@ echo "Adding third parties..."
 for thirdparty in "${thirdparties[@]}"
 do
     echo "- third party '$thirdparty'"
-    ./scripts/add_thirdparty.sh $thirdparty $3
+    bash ./scripts/add_thirdparty.sh "$thirdparty" "$3"
 done
 }

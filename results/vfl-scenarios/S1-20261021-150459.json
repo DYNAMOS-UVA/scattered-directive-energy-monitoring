@@ -1,0 +1,591 @@
+{
+    "metadata": {
+        "policy_check_interval": 1,
+        "policy_reintroduction": -1,
+        "policy_removal": -1,
+        "timing": {
+            "approval_ms": 2826.701,
+            "barrier_wait_ms": 199.902,
+            "bytes_received": 5392502,
+            "bytes_sent": 2935509,
+            "clock": "api-gateway",
+            "coordination_overhead_ms": 1.023,
+            "policy_check_ms": 12706.08,
+            "policy_checks": 4,
+            "rounds_ms": 18715.74,
+            "shutdown": {
+                "barrier_wait_ms": 59922.448,
+                "bytes_received": 80156,
+                "bytes_sent": 279260,
+                "calls": {
+                    "clientone": {
+                        "bytes_received": 0,
+                        "bytes_sent": 69815,
+                        "duration_ms": 60003.773,
+                        "failures": 1
+                    },
+                    "clientthree": {
+                        "bytes_received": 0,
+                        "bytes_sent": 69815,
+                        "duration_ms": 60004.528,
+                        "failures": 1
+                    },
+                    "clienttwo": {
+                        "bytes_received": 0,
+                        "bytes_sent": 69815,
+                        "duration_ms": 60005.513,
+                        "failures": 1
+                    },
+                    "server": {
+                        "bytes_received": 80156,
+                        "bytes_sent": 69815,
+                        "duration_ms": 86.124
+                    }
+                },
+                "duration_ms": 60005.698,
+                "spread_ms": 59919.389
+            },
+            "total_ms": 108657.553,
+            "warmup": {
+                "barrier_wait_ms": 3357.554,
+                "bytes_received": 3654,
+                "bytes_sent": 1236,
+                "calls": {
+                    "clientone": {
+                        "bytes_received": 914,
+                        "bytes_sent": 309,
+                        "duration_ms": 25520.239
+                    },
+                    "clientthree": {
+                        "bytes_received": 918,
+                        "bytes_sent": 309,
+                        "duration_ms": 26081.506
+                    },
+                    "clienttwo": {
+                        "bytes_received": 914,
+                        "bytes_sent": 309,
+                        "duration_ms": 26360.418
+                    },
+                    "server": {
+                        "bytes_received": 908,
+                        "bytes_sent": 309,
+                        "duration_ms": 27106.95
+                    }
+                },
+                "duration_ms": 27107.734,
+                "spread_ms": 1586.711
+            }
+        },
+        "total_rounds": 5,
+        "training_backtrack": 0
+    },
+    "request_id": "19c4e327-c6a9-4781-930d-f46cea12fb09",
+    "results": [
+        {
+            "accuracy": 66.81664791901012,
+            "clients": 3,
+            "timestamp": "2026-10-21T13:03:40Z",
+            "timing": {
+                "barrier_wait_ms": 47.441,
+                "bytes_received": 884845,
+                "bytes_sent": 417954,
+                "coordination_overhead_ms": 0.023,
+                "participants": {
+                    "clientone": {
+                        "active_ms": 4241.992,
+                        "idle_ms": 320.777
+                    },
+                    "clientthree": {
+                        "active_ms": 4204.35,
+                        "idle_ms": 358.419
+                    },
+                    "clienttwo": {
+                        "active_ms": 4247.586,
+                        "idle_ms": 315.183
+                    },
+                    "server": {
+                        "active_ms": 272.582,
+                        "idle_ms": 4290.186
+                    }
+                },
+                "phase_order": [
+                    "client_forward",
+                    "server_aggregate",
+                    "client_update"
+                ],
+                "phases": {
+                    "client_forward": {
+                        "barrier_wait_ms": 39.769,
+                        "bytes_received": 218969,
+                        "bytes_sent": 930,
+                        "calls": {
+                            "clientone": {
+                                "bytes_received": 73354,
+                                "bytes_sent": 310,
+                                "duration_ms": 158.117
+                            },
+                            "clientthree": {
+                                "bytes_received": 71511,
+                                "bytes_sent": 310,
+                                "duration_ms": 122.307
+                            },
+                            "clienttwo": {
+                                "bytes_received": 74104,
+                                "bytes_sent": 310,
+                                "duration_ms": 161.605
+                            }
+                        },
+                        "duration_ms": 168.531,
+                        "spread_ms": 39.297
+                    },
+                    "client_update": {
+                        "barrier_wait_ms": 7.672,
+                        "bytes_received": 230668,
+                        "bytes_sent": 200696,
+                        "calls": {
+                            "clientone": {
+                                "bytes_received": 76964,
+                                "bytes_sent": 66953,
+                                "duration_ms": 4083.874
+                            },
+                            "clientthree": {
+                                "bytes_received": 72476,
+                                "bytes_sent": 63039,
+                                "duration_ms": 4082.042
+                            },
+                            "clienttwo": {
+                                "bytes_received": 81228,
+                                "bytes_sent": 70704,
+                                "duration_ms": 4085.98
+                            }
+                        },
+                        "duration_ms": 4088.069,
+                        "spread_ms": 3.937
+                    },
+                    "server_aggregate": {
+                        "barrier_wait_ms": 0,
+                        "bytes_received": 435208,
+                        "bytes_sent": 216328,
+                        "calls": {
+                            "server": {
+                                "bytes_received": 435208,
+                                "bytes_sent": 216328,
+                                "duration_ms": 272.582
+                            }
+                        },
+                        "duration_ms": 306.144,
+                        "spread_ms": 0
+                    }
+                },
+                "policy_check_ms": 0,
+                "round_ms": 4562.769
+            },
+            "train_round": 0
+        },
+        {
+            "accuracy": 67.1541057367829,
+            "clients": 3,
+            "timestamp": "2026-10-21T13:03:44Z",
+            "timing": {
+                "barrier_wait_ms": 49.137,
+                "bytes_received": 1127777,
+                "bytes_sent": 630175,
+                "coordination_overhead_ms": 0.166,
+                "participants": {
+                    "clientone": {
+                        "active_ms": 248.418,
+                        "idle_ms": 3665.252
+                    },
+                    "clientthree": {
+                        "active_ms": 247.33,
+                        "idle_ms": 3666.34
+                    },
+                    "clienttwo": {
+                        "active_ms": 242.01,
+                        "idle_ms": 3671.66
+                    },
+                    "server": {
+                        "active_ms": 181.868,
+                        "idle_ms": 3731.802
+                    }
+                },
+                "phase_order": [
+                    "client_forward",
+                    "server_aggregate",
+                    "client_update"
+                ],
+                "phases": {
+                    "client_forward": {
+                        "barrier_wait_ms": 15.887,
+                        "bytes_received": 460250,
+                        "bytes_sent": 212082,
+                        "calls": {
+                            "clientone": {
+                                "bytes_received": 153688,
+                                "bytes_sent": 70694,
+                                "duration_ms": 187.069
+                            },
+                            "clientthree": {
+                                "bytes_received": 151943,
+                                "bytes_sent": 70694,
+                                "duration_ms": 204.242
+                            },
+                            "clienttwo": {
+                                "bytes_received": 154619,
+                                "bytes_sent": 70694,
+                                "duration_ms": 173.219
+                            }
+                        },
+                        "duration_ms": 215.598,
+                        "spread_ms": 31.022
+                    },
+                    "client_update": {
+                        "barrier_wait_ms": 33.25,
+                        "bytes_received": 231304,
+                        "bytes_sent": 201360,
+                        "calls": {
+                            "clientone": {
+                                "bytes_received": 77176,
+                                "bytes_sent": 67240,
+                                "duration_ms": 61.349
+                            },
+                            "clientthree": {
+                                "bytes_received": 73152,
+                                "bytes_sent": 63632,
+                                "duration_ms": 43.088
+                            },
+                            "clienttwo": {
+                                "bytes_received": 80976,
+                                "bytes_sent": 70488,
+                                "duration_ms": 68.791
+                            }
+                        },
+                        "duration_ms": 69.562,
+                        "spread_ms": 25.702
+                    },
+                    "server_aggregate": {
+                        "barrier_wait_ms": 0,
+                        "bytes_received": 436223,
+                        "bytes_sent": 216733,
+                        "calls": {
+                            "server": {
+                                "bytes_received": 436223,
+                                "bytes_sent": 216733,
+                                "duration_ms": 181.868
+                            }
+                        },
+                        "duration_ms": 186.239,
+                        "spread_ms": 0
+                    }
+                },
+                "policy_check_ms": 3442.103,
+                "round_ms": 3913.671
+            },
+            "train_round": 1
+        },
+        {
+            "accuracy": 67.2665916760405,
+            "clients": 3,
+            "timestamp": "2026-10-21T13:03:48Z",
+            "timing": {
+                "barrier_wait_ms": 45.937,
+                "bytes_received": 1126240,
+                "bytes_sent": 629334,
+                "coordination_overhead_ms": 0.166,
+                "participants": {
+                    "clientone": {
+                        "active_ms": 228.933,
+                        "idle_ms": 3288.353
+                    },
+                    "clientthree": {
+                        "active_ms": 216.058,
+                        "idle_ms": 3301.228
+                    },
+                    "clienttwo": {
+                        "active_ms": 221.293,
+                        "idle_ms": 3295.993
+                    },
+                    "server": {
+                        "active_ms": 152.09,
+                        "idle_ms": 3365.196
+                    }
+                },
+                "phase_order": [
+                    "client_forward",
+                    "server_aggregate",
+                    "client_update"
+                ],
+                "phases": {
+                    "client_forward": {
+                        "barrier_wait_ms": 27.269,
+                        "bytes_received": 459886,
+                        "bytes_sent": 211434,
+                        "calls": {
+                            "clientone": {
+                                "bytes_received": 153746,
+                                "bytes_sent": 70478,
+                                "duration_ms": 131.03
+                            },
+                            "clientthree": {
+                                "bytes_received": 151568,
+                                "bytes_sent": 70478,
+                                "duration_ms": 134.158
+                            },
+                            "clienttwo": {
+                                "bytes_received": 154572,
+                                "bytes_sent": 70478,
+                                "duration_ms": 122.584
+                            }
+                        },
+                        "duration_ms": 157.426,
+                        "spread_ms": 11.574
+                    },
+                    "client_update": {
+                        "barrier_wait_ms": 18.667,
+                        "bytes_received": 230528,
+                        "bytes_sent": 200775,
+                        "calls": {
+                            "clientone": {
+                                "bytes_received": 77460,
+                                "bytes_sent": 67538,
+                                "duration_ms": 97.902
+                            },
+                            "clientthree": {
+                                "bytes_received": 72528,
+                                "bytes_sent": 63102,
+                                "duration_ms": 81.899
+                            },
+                            "clienttwo": {
+                                "bytes_received": 80540,
+                                "bytes_sent": 70135,
+                                "duration_ms": 98.709
+                            }
+                        },
+                        "duration_ms": 101.932,
+                        "spread_ms": 16.809
+                    },
+                    "server_aggregate": {
+                        "barrier_wait_ms": 0,
+                        "bytes_received": 435826,
+                        "bytes_sent": 217125,
+                        "calls": {
+                            "server": {
+                                "bytes_received": 435826,
+                                "bytes_sent": 217125,
+                                "duration_ms": 152.09
+                            }
+                        },
+                        "duration_ms": 174.81,
+                        "spread_ms": 0
+                    }
+                },
+                "policy_check_ms": 3082.951,
+                "round_ms": 3517.287
+            },
+            "train_round": 2
+        },
+        {
+            "accuracy": 67.82902137232846,
+            "clients": 3,
+            "timestamp": "2026-10-21T13:03:51Z",
+            "timing": {
+                "barrier_wait_ms": 30.823,
+                "bytes_received": 1127889,
+                "bytes_sent": 629479,
+                "coordination_overhead_ms": 0.621,
+                "participants": {
+                    "clientone": {
+                        "active_ms": 179.934,
+                        "idle_ms": 3534.615
+                    },
+                    "clientthree": {
+                        "active_ms": 178.59,
+                        "idle_ms": 3535.958
+                    },
+                    "clienttwo": {
+                        "active_ms": 164.427,
+                        "idle_ms": 3550.122
+                    },
+                    "server": {
+                        "active_ms": 77.999,
+                        "idle_ms": 3636.55
+                    }
+                },
+                "phase_order": [
+                    "client_forward",
+                    "server_aggregate",
+                    "client_update"
+                ],
+                "phases": {
+                    "client_forward": {
+                        "barrier_wait_ms": 19.336,
+                        "bytes_received": 459143,
+                        "bytes_sent": 210375,
+                        "calls": {
+                            "clientone": {
+                                "bytes_received": 153938,
+                                "bytes_sent": 70125,
+                                "duration_ms": 112.125
+                            },
+                            "clientthree": {
+                                "bytes_received": 151440,
+                                "bytes_sent": 70125,
+                                "duration_ms": 117.694
+                            },
+                            "clienttwo": {
+                                "bytes_received": 153765,
+                                "bytes_sent": 70125,
+                                "duration_ms": 105.169
+                            }
+                        },
+                        "duration_ms": 127.888,
+                        "spread_ms": 12.524
+                    },
+                    "client_update": {
+                        "barrier_wait_ms": 11.486,
+                        "bytes_received": 231496,
+                        "bytes_sent": 201414,
+                        "calls": {
+                            "clientone": {
+                                "bytes_received": 77584,
+                                "bytes_sent": 67579,
+                                "duration_ms": 67.809
+                            },
+                            "clientthree": {
+                                "bytes_received": 73448,
+                                "bytes_sent": 63710,
+                                "duration_ms": 60.896
+                            },
+                            "clienttwo": {
+                                "bytes_received": 80464,
+                                "bytes_sent": 70125,
+                                "duration_ms": 59.257
+                            }
+                        },
+                        "duration_ms": 68.512,
+                        "spread_ms": 8.552
+                    },
+                    "server_aggregate": {
+                        "barrier_wait_ms": 0,
+                        "bytes_received": 437250,
+                        "bytes_sent": 217690,
+                        "calls": {
+                            "server": {
+                                "bytes_received": 437250,
+                                "bytes_sent": 217690,
+                                "duration_ms": 77.999
+                            }
+                        },
+                        "duration_ms": 87.914,
+                        "spread_ms": 0
+                    }
+                },
+                "policy_check_ms": 3429.611,
+                "round_ms": 3714.549
+            },
+            "train_round": 3
+        },
+        {
+            "accuracy": 68.95388076490438,
+            "clients": 3,
+            "timestamp": "2026-10-21T13:03:54Z",
+            "timing": {
+                "barrier_wait_ms": 26.563,
+                "bytes_received": 1125751,
+                "bytes_sent": 628567,
+                "coordination_overhead_ms": 0.045,
+                "participants": {
+                    "clientone": {
+                        "active_ms": 167.924,
+                        "idle_ms": 2839.537
+                    },
+                    "clientthree": {
+                        "active_ms": 127.719,
+                        "idle_ms": 2879.743
+                    },
+                    "clienttwo": {
+                        "active_ms": 159.027,
+                        "idle_ms": 2848.435
+                    },
+                    "server": {
+                        "active_ms": 70.008,
+                        "idle_ms": 2937.454
+                    }
+                },
+                "phase_order": [
+                    "client_forward",
+                    "server_aggregate",
+                    "client_update"
+                ],
+                "phases": {
+                    "client_forward": {
+                        "barrier_wait_ms": 23.892,
+                        "bytes_received": 458347,
+                        "bytes_sent": 210345,
+                        "calls": {
+                            "clientone": {
+                                "bytes_received": 153274,
+                                "bytes_sent": 70115,
+                                "duration_ms": 127.736
+                            },
+                            "clientthree": {
+                                "bytes_received": 151607,
+                                "bytes_sent": 70115,
+                                "duration_ms": 90.09
+                            },
+                            "clienttwo": {
+                                "bytes_received": 153466,
+                                "bytes_sent": 70115,
+                                "duration_ms": 119.177
+                            }
+                        },
+                        "duration_ms": 138.369,
+                        "spread_ms": 37.646
+                    },
+                    "client_update": {
+                        "barrier_wait_ms": 2.671,
+                        "bytes_received": 231384,
+                        "bytes_sent": 201088,
+                        "calls": {
+                            "clientone": {
+                                "bytes_received": 77572,
+                                "bytes_sent": 67407,
+                                "duration_ms": 40.188
+                            },
+                            "clientthree": {
+                                "bytes_received": 73628,
+                                "bytes_sent": 63859,
+                                "duration_ms": 37.628
+                            },
+                            "clienttwo": {
+                                "bytes_received": 80184,
+                                "bytes_sent": 69822,
+                                "duration_ms": 39.85
+                            }
+                        },
+                        "duration_ms": 40.952,
+                        "spread_ms": 2.559
+                    },
+                    "server_aggregate": {
+                        "barrier_wait_ms": 0,
+                        "bytes_received": 436020,
+                        "bytes_sent": 217134,
+                        "calls": {
+                            "server": {
+                                "bytes_received": 436020,
+                                "bytes_sent": 217134,
+                                "duration_ms": 70.008
+                            }
+                        },
+                        "duration_ms": 76.681,
+                        "spread_ms": 0
+                    }
+                },
+                "policy_check_ms": 2751.413,
+                "round_ms": 3007.462
+            },
+            "train_round": 4
+        }
+    ],
+    "status": "done"
+}

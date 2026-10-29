@@ -176,18 +176,18 @@ fetch_status() {
 json_field() {
     python3 -c 'import json, sys
 try:
-    d = json.loads(sys.argv[1])
+    d = json.load(sys.stdin)
 except json.JSONDecodeError:
     print("")
     raise SystemExit
 results = d.get("results") or []
-field = sys.argv[2]
+field = sys.argv[1]
 if field == "status":
     print(d.get("status", ""))
 elif field == "rounds":
     print(len(results))
 elif field == "last_clients":
-    print(results[-1].get("clients", "") if results else "")' "$1" "$2"
+    print(results[-1].get("clients", "") if results else "")' "$2" <<< "$1"
 }
 
 # wait_until_rounds <n> — polls until at least n rounds are recorded; fails if

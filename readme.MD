@@ -42,6 +42,18 @@ The policy enforcer evaluates the agreement together with shared eFLINT rules an
 
 The commands below were tested from a WSL terminal on Windows.
 
+### Line endings on Windows / WSL
+
+Bash scripts must use **LF**, not Windows **CRLF** line endings. CRLF can cause
+`$'\r': command not found` and misleading `No such file or directory` errors.
+The repository's `.gitattributes` enforces LF for shell scripts, configuration,
+and Linux build inputs, including when Git uses `core.autocrlf=true`.
+
+The VS Code workspace setting `files.eol` is already set to `\n` (LF) for new
+files. For an existing CRLF file, click **CRLF** in the bottom-right status bar,
+select **LF**, and save. `.editorconfig` supplies the same default to compatible
+editors. No global VS Code or Git setting change is required.
+
 The scenario scripts are in the repository's `scripts/` directory. The policy models are stored and updated through the policy-enforcer/orchestrator path; the repository copies of `.eflint` files are not modified by a normal scenario run.
 
 ### Install DYNAMOS
@@ -50,6 +62,28 @@ For a lightweight local demonstration without monitoring:
 
 ```bash
 bash ./configuration/dynamos-configuration-no-monitoring.sh local
+```
+
+Both installation scripts use `ORCHESTRATOR_IMAGE_TAG` from `dynamos.conf`,
+defaulting to `latest`, for the orchestrator chart's `orchestrator`,
+`policy-enforcer`, and `sidecar` images. This keeps the orchestrator sidecar on
+the same version as every other component. The tag can be overridden through
+the environment before running an installer (for example
+`ORCHESTRATOR_IMAGE_TAG=baseline-eflint-2`), but then the orchestrator runs a
+different sidecar version from the rest of DYNAMOS.
+
+To update only the orchestrator release in an existing local installation,
+run these commands from the repository root (the release is in `default`,
+while its workloads are in `orchestrator`):
+
+```bash
+source ./dynamos.conf
+helm upgrade orchestrator ./charts/orchestrator --namespace default --reuse-values \
+  --set-string "dockerArtifactAccount=${DOCKERHUB_ACCOUNT}" \
+  --set-string "branchNameTag=${ORCHESTRATOR_IMAGE_TAG}"
+kubectl -n orchestrator rollout status deployment/policy-enforcer --timeout=300s
+kubectl -n orchestrator rollout status deployment/orchestrator --timeout=300s
+kubectl -n orchestrator get pods
 ```
 
 ### Uninstall DYNAMOS
@@ -77,6 +111,87 @@ kubectl -n orchestrator port-forward svc/orchestrator 18082:8080
 ## Tests
 
 The scenario scripts submit a VFL request, query the policy enforcer at the configured policy-check interval, and store a final JSON result. The result contains a status and, for each executed training round, the number of participating clients.
+
+Scenario status parsing reads JSON through standard input, so large responses
+from longer runs do not hit the operating system's command-line argument limit.
+Run the parsing regression test with
+`bash scripts/tests/vfl-scenario-json-field-test.sh`.
+
+### Timing and communication metrics
+
+The API gateway drives every phase of a round, so it records timings from its own
+(single, monotonic) clock. Each `results[i].timing` contains:
+
+| Field | Meaning |
+|---|---|
+| `round_ms` | Wall time of the round, including its policy check. |
+| `policy_check_ms` | Policy re-verification (reasoning) before the round; 0 when no check ran. |
+| `phases.<name>` | `client_forward`, `server_aggregate`, `client_update`: wall time, `barrier_wait_ms`, `spread_ms`, bytes, and per-participant round trips (`calls`). |
+| `barrier_wait_ms` | Synchronisation cost: summed time participants that finished a parallel phase early waited for the slowest one. |
+| `coordination_overhead_ms` | Gateway work between phases (round − policy check − phases). |
+| `participants.<name>` | `active_ms` (own round trips) and `idle_ms` (rest of the round). |
+
+`metadata.timing` aggregates the run: `approval_ms` (initial approval and job
+composition), `warmup` (ping phase), summed round/policy/barrier/overhead times,
+total bytes, `shutdown`, and `total_ms`. A round trip includes transport, queueing
+and compute. Updated job sidecars provide `algorithm_ms`, allowing the gateway
+to report the remaining `communication_ms` (communication and middleware).
+`measured_calls` and `unmeasured_calls` indicate coverage; absent measurements
+are not treated as zero. See [the metric definitions and deployment notes](results/info/timing-metrics.md)
+for the exact boundaries, aggregation rules, and deployment notes. All
+components must run the same sidecar image.
+
+### Visualizing scenario results
+
+Install the plotting dependency once, then generate a timing dashboard:
+
+```bash
+python3 -m pip install -r plots/requirements.txt
+python3 plots/plot_vfl_timing.py results/vfl-scenarios/S1-20261021-162842.json
+```
+
+The PNG is saved under `results/vfl-scenarios/plots/` (gitignored). The four
+panels show round wall time split into training/policy/coordination,
+algorithm versus communication-and-middleware time, synchronization wait,
+and gateway payload volume. Only training rounds are included: approval,
+warm-up and shutdown are excluded. Policy time includes messaging and
+reasoning, not just the reasoner.
+
+For deployment comparisons, supply multiple JSON files and optional labels:
+
+```bash
+python3 plots/plot_vfl_timing.py local.json distributed.json \
+  --labels Local Distributed
+```
+
+This produces a dashboard per file and `comparison.png`. Comparisons use
+means per round, except algorithm/communication time, which uses means per
+measured call. Use matching algorithm, participant count, batch size, round
+count and policy-check interval for meaningful comparisons. The first round
+is included and can contain algorithm initialization.
+
+For steady-state plots without the first round's initialization spike, add
+`--skip-rounds 1`. This applies to every input and recomputes all summaries
+from the remaining rounds, preserving the exported round indices:
+
+```bash
+python3 plots/plot_vfl_timing.py results/vfl-scenarios/S1-20261021-162842.json \
+  --skip-rounds 1 --output-dir results/vfl-scenarios/plots/steady
+```
+
+Communication and synchronization are summed **participant times**, not
+additive parts of wall time. Communication includes middleware and queueing;
+payload bytes are gateway request/response bodies, not total network traffic.
+Missing sidecar measurements are shown as unavailable, not zero; partial
+coverage is labelled and emits a warning. Input files without gateway timing
+are rejected. Failed or partial runs show their recorded rounds and status.
+
+Use `--output-dir <directory>` to change the destination. The script runs
+headlessly, so it also works in WSL and on remote machines. Run its tests with:
+
+```bash
+python3 -m unittest discover -s plots -p test_plot_vfl_timing.py
+```
 
 ### Timeline legend
 

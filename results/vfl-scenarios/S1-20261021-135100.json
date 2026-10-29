@@ -1,0 +1,43 @@
+{
+    "metadata": {
+        "policy_check_interval": 1,
+        "policy_reintroduction": -1,
+        "policy_removal": -1,
+        "total_rounds": 5,
+        "training_backtrack": 0
+    },
+    "request_id": "5354676b-024d-49ff-b85c-3d1b1970bbfc",
+    "results": [
+        {
+            "accuracy": 40.719910011248594,
+            "clients": 3,
+            "timestamp": "2026-10-21T11:49:43Z",
+            "train_round": 0
+        },
+        {
+            "accuracy": 42.1822272215973,
+            "clients": 3,
+            "timestamp": "2026-10-21T11:49:47Z",
+            "train_round": 1
+        },
+        {
+            "accuracy": 42.96962879640045,
+            "clients": 3,
+            "timestamp": "2026-10-21T11:49:50Z",
+            "train_round": 2
+        },
+        {
+            "accuracy": 43.7570303712036,
+            "clients": 3,
+            "timestamp": "2026-10-21T11:49:53Z",
+            "train_round": 3
+        },
+        {
+            "accuracy": 44.43194600674916,
+            "clients": 3,
+            "timestamp": "2026-10-21T11:49:57Z",
+            "train_round": 4
+        }
+    ],
+    "status": "done"
+}

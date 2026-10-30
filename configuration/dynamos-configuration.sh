@@ -6,12 +6,24 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 source "${SCRIPT_DIR}/../dynamos.conf"
 
-if [ "$1" == "local" ]; then
+if [ "${1:-}" == "local" ]; then
     CHARTS_PATH="${CHARTS_LOCAL_PATH}"
-elif [ "$1" == "fabric" ]; then
+elif [ "${1:-}" == "fabric" ]; then
     CHARTS_PATH="${CHARTS_FABRIC_PATH}"
 else
     echo ">!< ERROR: You must specify an environment argument: 'local' or 'fabric'. >!<"
+    exit 1
+fi
+
+if [ "$#" -gt 2 ] || { [ -n "${2:-}" ] && [ "$2" != "--no-monitoring" ]; }; then
+    echo "Usage: $0 <local|fabric> [--no-monitoring]" >&2
+    exit 1
+fi
+
+if [ ! -f "${FABRIC_PATH}/node_scripts/configure_dynamos.sh" ] || \
+   [ ! -f "${CONFIG_PATH}/etcd_launch_files/agreements.json" ]; then
+    echo "ERROR: DYNAMOS_ROOT='${DYNAMOS_ROOT}' does not contain the required installation files." >&2
+    echo "Unset a stale override with 'unset DYNAMOS_ROOT' or point it to a complete checkout." >&2
     exit 1
 fi
 
@@ -33,13 +45,12 @@ k8s_service_files="${CONFIG_PATH}/k8s_service_files"
 etcd_launch_files="${CONFIG_PATH}/etcd_launch_files"
 
 # Add agents
-agents=$(grep '"name":' ${etcd_launch_files}/agreements.json | awk -F'"' '{print $4}' | paste -sd "," -)
+agents=$(grep '"name":' "${etcd_launch_files}/agreements.json" | awk -F'"' '{print $4}' | paste -sd "," -)
 echo -e "Agents discovered: $agents\n"
 
 echo -e "Generating agents and third parties charts...\n"
 configure_dynamos="${DYNAMOS_ROOT}/fabric/node_scripts/configure_dynamos.sh"
-chmod +x ${configure_dynamos}
-${configure_dynamos} $agents "" "$1"
+bash "${configure_dynamos}" "$agents" "" "$1"
 
 rabbit_definitions_file="${k8s_service_files}/definitions.json"
 example_definitions_file="${k8s_service_files}/definitions_example.json"
@@ -56,16 +67,16 @@ hashed_pw=$($SUDO docker run --rm rabbitmq:3-management rabbitmqctl hash_passwor
 actual_hash=$(echo "$hashed_pw" | cut -d $'\n' -f2)
 
 echo -e "Replacing tokens...\n"
-cp ${k8s_service_files}/definitions_example.json ${rabbit_definitions_file}
+cp "${k8s_service_files}/definitions_example.json" "${rabbit_definitions_file}"
 
 
 # The Rabbit Hashed password needs to be in definitions.json file, that is the configuration for RabbitMQ
 if [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS sed
-    sed -i '' "s|%PASSWORD%|${actual_hash}|g" ${rabbit_definitions_file}
+    sed -i '' "s|%PASSWORD%|${actual_hash}|g" "${rabbit_definitions_file}"
 else
     # GNU sed
-    sed -i "s|%PASSWORD%|${actual_hash}|g" ${rabbit_definitions_file}
+    sed -i "s|%PASSWORD%|${actual_hash}|g" "${rabbit_definitions_file}"
 fi
 
 echo -e "Installing namespaces...\n"
@@ -74,33 +85,34 @@ helm upgrade -i -f ${namespace_chart}/values.yaml namespaces ${namespace_chart} 
 echo -e "\nPreparing PVC...\n"
 
 {
-    cd ${DYNAMOS_ROOT}/configuration
-    ./fill-rabbit-pvc.sh "$1"
+    cd "${CONFIG_PATH}"
+    bash ./fill-rabbit-pvc.sh "$1"
 }
 
-echo -e "\nPreparing energy monitoring installation...\n"
-
-{
-    cd ${DYNAMOS_ROOT}/configuration
-    ./dynamos-monitoring-configuration.sh "$1"
-}
+if [ "${2:-}" != "--no-monitoring" ]; then
+    echo -e "\nPreparing energy monitoring installation...\n"
+    (
+        cd "${CONFIG_PATH}"
+        bash ./dynamos-monitoring-configuration.sh "$1"
+    )
+fi
 
 echo -e "\nInstalling NGINX...\n"
-helm install -f ${core_chart}/ingress-values.yaml nginx oci://ghcr.io/nginxinc/charts/nginx-ingress -n ingress --version 0.18.0
+helm upgrade -i -f "${core_chart}/ingress-values.yaml" nginx oci://ghcr.io/nginxinc/charts/nginx-ingress -n ingress --version 0.18.0
 
 echo -e "Installing DYNAMOS core...\n"
-helm upgrade -i -f ${core_chart}/values.yaml core ${core_chart} --set hostPath=${HOME}
+helm upgrade -i -f "${core_chart}/values.yaml" core "${core_chart}" --set hostPath="${HOME}"
 
 sleep 3
 
 echo -e "\nInstalling orchestrator layer...\n"
-helm upgrade -i -f ${orchestrator_chart}/values.yaml orchestrator ${orchestrator_chart} --set dockerArtifactAccount=${DOCKERHUB_ACCOUNT}
+helm upgrade -i -f "${orchestrator_chart}/values.yaml" orchestrator "${orchestrator_chart}" --set dockerArtifactAccount="${DOCKERHUB_ACCOUNT}" --set-string branchNameTag="${DYNAMOS_IMAGE_TAG}"
 
 if [ "$1" == "local" ]; then
     echo "Transferring local etcd_launch_files..."
     {
-        cd ${DYNAMOS_ROOT}/configuration
-        ./fill-etcd-pvc.sh
+        cd "${CONFIG_PATH}"
+        bash ./fill-etcd-pvc.sh
     }
 fi
 
@@ -109,17 +121,17 @@ fi
 sleep 1
 
 echo -e "\nInstalling agents layer...\n"
-helm upgrade -i -f ${agents_chart}/values.yaml agents ${agents_chart} --set dockerArtifactAccount=${DOCKERHUB_ACCOUNT}
+helm upgrade -i -f "${agents_chart}/values.yaml" agents "${agents_chart}" --set dockerArtifactAccount="${DOCKERHUB_ACCOUNT}" --set-string branchNameTag="${DYNAMOS_IMAGE_TAG}"
 
 sleep 1
 
 echo -e "\nInstalling thirdparty layer...\n"
-helm upgrade -i -f ${ttp_chart}/values.yaml surf ${ttp_chart} --set dockerArtifactAccount=${DOCKERHUB_ACCOUNT}
+helm upgrade -i -f "${ttp_chart}/values.yaml" surf "${ttp_chart}" --set dockerArtifactAccount="${DOCKERHUB_ACCOUNT}" --set-string branchNameTag="${DYNAMOS_IMAGE_TAG}"
 
 sleep 1
 
 echo -e "\nInstalling api gateway...\n"
-helm upgrade -i -f ${api_gw_chart}/values.yaml api-gateway ${api_gw_chart} --set dockerArtifactAccount=${DOCKERHUB_ACCOUNT}
+helm upgrade -i -f "${api_gw_chart}/values.yaml" api-gateway "${api_gw_chart}" --set dockerArtifactAccount="${DOCKERHUB_ACCOUNT}" --set-string branchNameTag="${DYNAMOS_IMAGE_TAG}"
 
 echo -e "\n=============== Finished setting up DYNAMOS ===============\n"
 

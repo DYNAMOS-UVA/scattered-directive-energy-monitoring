@@ -30,7 +30,11 @@ spec:
         - name: DATA_STEWARD_NAME
           value: clienttwo
         - name: MICROSERVICE_REPOSITORY_NAME
-          value: apipilikas
+          value: {{ .Values.dockerArtifactAccount | quote }}
+        - name: SIDECAR_REPOSITORY_NAME
+          value: {{ .Values.dockerArtifactAccount | quote }}
+        - name: MICROSERVICE_TAG
+          value: {{ .Values.branchNameTag | quote }}
         - name: OC_AGENT_HOST
           value: {{ .Values.tracingEndpoint }}
       - name: sidecar

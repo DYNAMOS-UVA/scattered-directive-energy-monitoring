@@ -1,18 +1,17 @@
-# Scattered Directive
+<div align="right">
+  <a href="https://github.com/Apipilikas/scattered-directive-energy-monitoring/tree/main">
+    <strong>🔙 Return to <code>main</code> branch</strong>
+  </a>
+</div>
 
-Welcome to Scattered Directive. This is an automated and reproducible framework to deploy the digital data marketplace
-platform [DYNAMOS](https://github.com/Jorrit05/DYNAMOS) on the [FABRIC](https://portal.fabric-testbed.net) Research
-Infrastructure.
+<div align="center">
 
-Scattered Directive automates the entire setup, from requesting nodes to configuring and deploying DYNAMOS with the
-relevant relations to the nodes all defined. This allows researchers and developers (you!) to utilise DYNAMOS without
-any hassle.
+# Scattered Directive Energy Monitoring
+### Branch: `semi-overlap-fed-bcd`
 
-To prove our implementation of Scattered Directive, we utilised it to implement a Vertical Federated Learning workload,
-creating a new archetype to support shared execution of the global model training on a trusted third party. This
-archetype is aptly named *Shared Execution via TTP*.
+*This branch contains the Overlap-Fed-BCD implementation.*
 
-## Setup
+</div>
 
 ### Local or FABRIC deployment from Bash
 

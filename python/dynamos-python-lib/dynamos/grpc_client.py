@@ -13,6 +13,7 @@ Author: Jorrit Stutterheim
 """
 
 import grpc
+import math
 import time
 from .base_client import BaseClient
 from .rabbit_client import RabbitClient
@@ -51,39 +52,56 @@ class GRPCClient(BaseClient):
         self.channel.close()
         self.logger.debug("Closed gRPC channel")
 
-    def get_grpc_connection(self, grpc_addr):
+    def get_grpc_connection(self, grpc_addr, startup_timeout=120):
         """
         Get a gRPC connection to the server.
 
         Args:
             grpc_addr (str): The address of the gRPC server.
+            startup_timeout (float): Maximum seconds to wait for a healthy peer.
 
         Returns:
             grpc.Channel: The gRPC channel.
 
         Raises:
-            Exception: If unable to connect to the gRPC server after 7 retries.
+            TimeoutError: If the peer is not healthy before the startup deadline.
 
         """
+        if not math.isfinite(startup_timeout) or startup_timeout <= 0:
+            raise ValueError("startup_timeout must be finite and positive")
         channel = grpc.insecure_channel(grpc_addr)
         grpc_server_instrumentor = GrpcInstrumentorClient()
         grpc_server_instrumentor.instrument(channel=channel)
 
         self.logger.debug(f"Try connecting to: {grpc_addr}")
-        for i in range(1, 8):  # maximum of 7 retries
+        deadline = time.monotonic() + startup_timeout
+        health_stub = healthServer.HealthStub(channel)
+        last_error = "peer did not report SERVING"
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
-                health_stub = healthServer.HealthStub(channel)
-                response = health_stub.Check(healthTypes.HealthCheckRequest())
+                response = health_stub.Check(
+                    healthTypes.HealthCheckRequest(), timeout=min(5, remaining)
+                )
                 if response.status == healthTypes.HealthCheckResponse.SERVING:
                     self.logger.info(f"Successfully connected to gRPC server at {grpc_addr}")
                     return channel  # Return the channel
+                last_error = f"peer health status is {response.status}, not SERVING"
+                self.logger.warning(last_error)
             except grpc.RpcError as e:
-                self.logger.warning(f"Could not check: {e.details()}")
+                last_error = e.details()
+                self.logger.warning(f"Could not check: {last_error}")
 
-            self.logger.info("Sleep 1 second")
-            time.sleep(1)  # Wait a second before checking again
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(1, remaining))
 
-        raise Exception(f"Could not connect with gRPC {grpc_addr} after {i} tries")
+        channel.close()
+        message = f"Could not connect with gRPC {grpc_addr} within {startup_timeout}s: {last_error}"
+        self.logger.error(message)
+        raise TimeoutError(message)
 
 
 class MicroserviceClient:

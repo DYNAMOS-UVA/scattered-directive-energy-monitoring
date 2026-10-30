@@ -27,22 +27,22 @@ func (s Set) Has(v string) bool {
 	return ok
 }
 
-// Function expects a valid email address and the length of the desired GUID
+// GenerateJobName accepts an email address or a plain username.
 // Example:
 //
 // fmt.Println(GenerateJobName("example.two@cloud.com", 8))
 // prints: example-two-12345678 (some GUID of length 8, prefixed with a hyphen)
 func GenerateJobName(email string, length int) string {
-	// Extract the part before '@' symbol
+	// Email identities use the local part; plain usernames use the whole name.
 	atIndex := strings.Index(email, "@")
-	if atIndex == -1 {
-		return ""
+	domain := email
+	if atIndex != -1 {
+		domain = email[:atIndex]
 	}
-	domain := email[:atIndex]
 
 	// Remove special characters and replace with hyphen
 	re := regexp.MustCompile(`[^a-zA-Z0-9]+`)
-	domain = re.ReplaceAllString(domain, "-")
+	domain = strings.Trim(strings.ToLower(re.ReplaceAllString(domain, "-")), "-")
 
 	// Generate a random GUID of the given length
 	guid := uuid.New().String()
@@ -50,7 +50,6 @@ func GenerateJobName(email string, length int) string {
 		guid = guid[:length]
 	}
 
-	// Construct the final email address
 	return fmt.Sprintf("%s-%s", domain, guid)
 }
 

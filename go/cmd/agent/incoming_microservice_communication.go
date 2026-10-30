@@ -38,36 +38,6 @@ func isJobWaiting(ctx context.Context, msComm *pb.MicroserviceCommunication, cor
 	return false
 }
 
-func isHttpWaiting(ctx context.Context, msComm *pb.MicroserviceCommunication, correlationId string) bool {
-	logger.Debug("Enter isHttpWaiting")
-
-	ctx, span := trace.StartSpan(ctx, "isHttpWaiting")
-	defer span.End()
-	// Check if there is a http result waiting for this
-	mutex.Lock()
-	// Look up the corresponding channel in the request map
-	dataResponseChan, ok := responseMap[correlationId]
-	logger.Sugar().Info("Response map: ", responseMap)
-	mutex.Unlock()
-
-	if ok {
-		logger.Sugar().Info("Sending requestData to channel")
-
-		// Send a signal on the channel to indicate that the response is ready
-		dataResponseChan <- dataResponse{response: msComm, localContext: ctx}
-
-		// TODO: Test if this is making things stop
-		mutex.Lock()
-		delete(responseMap, correlationId)
-		mutex.Unlock()
-
-		// logger.Debug("returning from responding......")
-		return true
-	}
-
-	return false
-}
-
 func isThirdPartyWaiting(ctx context.Context, msComm *pb.MicroserviceCommunication, correlationId string) bool {
 	logger.Debug("Enter isThirdPartyWaiting")
 

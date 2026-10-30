@@ -63,6 +63,8 @@ func requestHandler() http.HandlerFunc {
 
 		// Generate correlationID for this request
 		correlationId := uuid.New().String()
+		responseChan, cleanupResponse := registerHTTPResponse(correlationId)
+		defer cleanupResponse()
 
 		// Switch on the role we have in this data request
 		if strings.EqualFold(compositionRequest.Role, "computeProvider") {
@@ -85,14 +87,6 @@ func requestHandler() http.HandlerFunc {
 			http.Error(w, "Bad request", http.StatusBadRequest)
 			return
 		}
-
-		// Create a channel to receive the response
-		responseChan := make(chan dataResponse)
-
-		// Store the request information in the map
-		mutex.Lock()
-		responseMap[correlationId] = responseChan
-		mutex.Unlock()
 
 		select {
 		case dataResponseStruct := <-responseChan:

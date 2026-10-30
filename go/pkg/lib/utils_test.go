@@ -2,12 +2,29 @@ package lib
 
 import (
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
 
 	"gotest.tools/assert"
 )
+
+func TestGenerateJobNameIdentity(t *testing.T) {
+	for _, tc := range []struct{ identity, prefix string }{
+		{"requestor", "requestor"},
+		{"example.two@cloud.com", "example-two"},
+		{"Requestor", "requestor"},
+		{"-Example_User-@cloud.com", "example-user"},
+	} {
+		t.Run(tc.identity, func(t *testing.T) {
+			name := GenerateJobName(tc.identity, 8)
+			if !regexp.MustCompile("^" + tc.prefix + "-[0-9a-f]{8}$").MatchString(name) {
+				t.Fatalf("unexpected Job name %q for %q", name, tc.identity)
+			}
+		})
+	}
+}
 
 func TestGenerateGuid(t *testing.T) {
 	testCases := []struct {

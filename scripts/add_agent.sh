@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 {
 if [ -z "$1" ]; then
   echo "No agent name provided."
@@ -15,7 +17,9 @@ else
     exit 1
 fi
 
-sed -e "s/^# //" -e "s/%WORKER%/$1/g" "${CHARTS_PATH}/agents/templates/workerX.yaml" > "${CHARTS_PATH}/agents/templates/${1}.yaml"
+if [ ! -f "${CHARTS_PATH}/agents/templates/${1}.yaml" ]; then
+    sed -e "s/^# //" -e "s/%WORKER%/$1/g" "${CHARTS_PATH}/agents/templates/workerX.yaml" > "${CHARTS_PATH}/agents/templates/${1}.yaml"
+fi
 
 if ! grep -q "namespace: $1" ${CHARTS_PATH}/agents/templates/cluster_role.yaml; then
 tee -a ${CHARTS_PATH}/agents/templates/cluster_role.yaml << END
@@ -43,5 +47,5 @@ subjects:
 END
 fi
 
-./scripts/add_namespace.sh $1 $2
+bash ./scripts/add_namespace.sh "$1" "$2"
 }

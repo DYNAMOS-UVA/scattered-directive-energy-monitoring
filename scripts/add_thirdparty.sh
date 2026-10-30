@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 {
 if [ -z "$1" ]; then
   echo "No thirdparty name provided."
@@ -15,7 +17,9 @@ else
     exit 1
 fi
 
-sed -e "s/^# //" -e "s/%THIRDPARTY%/$1/g" "${CHARTS_PATH}/thirdparty/templates/thirdpartyX.yaml" > "${CHARTS_PATH}/thirdparty/templates/${1}.yaml"
+if [ ! -f "${CHARTS_PATH}/thirdparty/templates/${1}.yaml" ]; then
+    sed -e "s/^# //" -e "s/%THIRDPARTY%/$1/g" "${CHARTS_PATH}/thirdparty/templates/thirdpartyX.yaml" > "${CHARTS_PATH}/thirdparty/templates/${1}.yaml"
+fi
 
 if ! grep -q "namespace: $1" ${CHARTS_PATH}/thirdparty/templates/cluster_role.yaml; then
 
@@ -26,7 +30,7 @@ tee -a ${CHARTS_PATH}/thirdparty/templates/cluster_role.yaml << END
 END
 fi
 
-tee -a charts/thirdparty/templates/cluster_role.yaml << END
+tee -a "${CHARTS_PATH}/thirdparty/templates/cluster_role.yaml" << END
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -51,5 +55,5 @@ subjects:
 END
 fi
 
-./scripts/add_namespace.sh $1
+bash ./scripts/add_namespace.sh "$1" "$2"
 }

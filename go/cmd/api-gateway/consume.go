@@ -63,10 +63,15 @@ func handlePolicyUpdateMessage(ctx context.Context, grpcMsg *pb.SideCarMessage) 
 	policyUpdateMutex.Lock()
 	key := policyUpdate.User.Id
 	policyUpdateRequest, ok := policyUpdateMap[key]
+	done := policyUpdateDone[key]
 	policyUpdateMutex.Unlock()
 
 	if ok {
-		policyUpdateRequest <- PolicyUpdateResponse{response: policyUpdate, localContext: ctx}
+		select {
+		case policyUpdateRequest <- PolicyUpdateResponse{response: policyUpdate, localContext: ctx}:
+		case <-done:
+			logger.Sugar().Warnw("Policy update arrived after training ended", "user_id", key)
+		}
 	} else {
 		logger.Sugar().Error("No job information available for this policyUpdate with key: ", key)
 	}

@@ -159,7 +159,7 @@ func ChainConsume(ctx context.Context, queueName string, autoAck bool, msClient 
 					logger.Debug("msg.Headers == nil")
 				}
 
-				resp, err := msClient.SendData(ctx, msComm)
+				resp, err := serverInstance.forwardToAlgorithm(ctx, msClient, msComm)
 				if err != nil {
 					logger.Sugar().Errorf("Error calling SendData: %v", err)
 				} else {

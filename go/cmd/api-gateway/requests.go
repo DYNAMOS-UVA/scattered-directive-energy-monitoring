@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -230,11 +231,34 @@ func startTraining(protoRequest *pb.RequestApproval, dataRequestInterface map[st
 
 }
 
+func orderedClientAuths(clients map[string]string) []string {
+	clientAuths := make([]string, 0, len(clients))
+	for auth := range clients {
+		clientAuths = append(clientAuths, auth)
+	}
+	sort.Slice(clientAuths, func(i, j int) bool {
+		lowerI, lowerJ := strings.ToLower(clientAuths[i]), strings.ToLower(clientAuths[j])
+		if lowerI == lowerJ {
+			return clientAuths[i] < clientAuths[j]
+		}
+		return lowerI < lowerJ
+	})
+	return clientAuths
+}
+
+func validateGradientCount(actual, expected int) error {
+	if actual != expected {
+		return fmt.Errorf("server returned %d gradients for %d clients", actual, expected)
+	}
+	return nil
+}
+
 func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, serverAuth string, serverUrl string, learning_rate float64, trainingBacktrack int64) (float64, []*phaseRecorder, error) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	responses := map[string]string{}
 	var phases []*phaseRecorder
+	clientAuths := orderedClientAuths(clients)
 
 	forward := startPhase("client_forward")
 	phases = append(phases, forward)
@@ -321,8 +345,8 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 	// }
 	// Collect embeddings from all clients
 	embeddingList := []string{}
-	for approved_client := range clients {
-		if emb, ok := responses[strings.ToLower(approved_client)]; ok {
+	for _, auth := range clientAuths {
+		if emb, ok := responses[strings.ToLower(auth)]; ok {
 			embeddingList = append(embeddingList, emb)
 		}
 	}
@@ -340,9 +364,10 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 		return 0., phases, err
 	}
 
-	responseData, error := aggregate.send(target, endpoint, dataRequestJson)
-	if error != nil {
-		logger.Sugar().Errorf("Error sending data to the server, %v", error)
+	responseData, err := aggregate.send(target, endpoint, dataRequestJson)
+	if err != nil {
+		logger.Sugar().Errorf("Error sending data to the server, %v", err)
+		return 0., phases, err
 	}
 
 	serverResponse := &pb.MicroserviceCommunication{}
@@ -350,6 +375,7 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 
 	if err != nil {
 		logger.Sugar().Error("Unmarshalling response did not go well: ", err)
+		return 0., phases, err
 	}
 
 	accuracy := serverResponse.Data.GetFields()["accuracy"].GetNumberValue()
@@ -359,6 +385,9 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 	for _, val := range gradientList {
 		gradients = append(gradients, val.GetStringValue())
 	}
+	if err := validateGradientCount(len(gradients), len(clientAuths)); err != nil {
+		return 0., phases, err
+	}
 
 	aggregate.finish()
 
@@ -367,8 +396,8 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 	phases = append(phases, update)
 	defer update.finish()
 
-	index := 0
-	for auth, url := range clients {
+	for index, auth := range clientAuths {
+		url := clients[auth]
 		wg.Add(1)
 		target := strings.ToLower(auth)
 		endpoint := fmt.Sprintf("http://%s:8080/agent/v1/vflTrainRequest/%s", url, target)
@@ -380,8 +409,6 @@ func runVFLTrainingRound(dataRequest map[string]any, clients map[string]string, 
 		}
 
 		logger.Sugar().Info("Sending gradient descent request to client: ", auth, " at url: ", url)
-
-		index++
 
 		dataRequestJson, err := json.Marshal(dataRequest)
 		if err != nil {

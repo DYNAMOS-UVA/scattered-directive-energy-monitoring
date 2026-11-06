@@ -46,3 +46,4 @@ fabric/fabric_config/ssh_config
 /run_dumps
 server_state.pth
 /experiments/
+/temp

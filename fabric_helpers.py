@@ -99,30 +99,28 @@ def create_slice(fablib):
 def configure_networking(slice_):
     """Assign data-plane IPs and add routes between the per-site FABNetv4 networks.
 
-    Addresses are not persistent: rerun this after rebooting nodes.
+    Same logic as the original install_dynamos.ipynb. Addresses are handed out in the same
+    order on every run, so rerunning (e.g. after a reboot) reapplies the same IPs; FABlib
+    ignores "already exists" errors. Addresses are not persistent across reboots.
     """
-    networks = {site: slice_.get_network(name=network_name(site)) for site in sites()}
-    subnets = {site: network.get_subnet() for site, network in networks.items()}
+    nodes = slice_.get_nodes()
+    networks = [slice_.get_network(name=network_name(site)) for site in sites()]
 
-    for site, network in networks.items():
-        gateway = network.get_gateway()
-        site_nodes = [node for node in slice_.get_nodes() if node.get_site() == site]
-        available = network.get_available_ips(len(site_nodes))
+    for site, network in zip(sites(), networks):
+        site_nodes = [node for node in nodes if node.get_site() == site]
+        available_ips = network.get_available_ips(len(site_nodes))
+        network_gateway = network.get_gateway()
+        network_subnet = network.get_subnet()
 
         for node in site_nodes:
             interface = node.get_interface(network_name=network_name(site))
-            address = interface.get_ip_addr()
-            if not address:
-                address = available.pop(0)
-                network.allocate_ip(address)
-            device = interface.get_device_name()
-            run(node, f"sudo ip link set dev {device} up", quiet=True)
-            present = run(node, f"ip -4 -o addr show dev {device}", check=False, quiet=True)
-            if f" {address}/" not in present:
-                interface.ip_addr_add(addr=address, subnet=subnets[site])
-            for other_site, subnet in subnets.items():
-                if other_site != site:
-                    run(node, f"sudo ip route replace {subnet} via {gateway}", quiet=True)
+            address = available_ips.pop(0)
+            network.allocate_ip(address)
+            interface.ip_addr_add(addr=address, subnet=network_subnet)
+            node.ip_route_add(subnet=network_subnet, gateway=network_gateway)
+            # Multisite IPv4 connectivity: route every site's subnet via the local gateway.
+            for other in networks:
+                node.ip_route_add(subnet=other.get_subnet(), gateway=network_gateway)
             print(f"{node.get_name():<12} {site:<5} {address}")
 
 

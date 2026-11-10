@@ -72,6 +72,74 @@ def data_ip(node):
     return str(node.get_interface(network_name=network_name(node.get_site())).get_ip_addr())
 
 
+# Agents whose namespace and Kubernetes node share the agent's name; each starts its job pods on that node.
+JOB_AGENTS = ("server", "clientone", "clienttwo", "clientthree", "aggregator", "authority")
+
+
+def _agent_env(control, namespace):
+    jsonpath = '{range .items[*].spec.template.spec.containers[*].env[*]}{.name}={.value}{"\\n"}{end}'
+    output = run(control, f"kubectl get deploy -n {namespace} -o jsonpath={shlex.quote(jsonpath)} 2>/dev/null",
+                 check=False, quiet=True)
+    env = {}
+    for line in output.splitlines():
+        name, sep, value = line.partition("=")
+        if sep and name not in env:
+            env[name] = value
+    return env
+
+
+def job_images(control, checkout):
+    """Map each deployed agent node to the job images its agent will start (same lookup as the agent)."""
+    import json
+
+    request_types = json.loads(run(
+        control, f"cat {checkout}/configuration/etcd_launch_files/requestType.json", quiet=True))
+    services = sorted({s for rt in request_types for s in rt.get("requiredServices", [])})
+    images = {}
+    for agent in JOB_AGENTS:
+        env = _agent_env(control, agent)
+        tag = env.get("MICROSERVICE_TAG")
+        if not tag:
+            continue
+        repo = env.get("MICROSERVICE_REPOSITORY_NAME") or "dynamos1"
+        sidecar = env.get("SIDECAR_NAME") or "sidecar"
+        sidecar_repo = env.get("SIDECAR_REPOSITORY_NAME") or "dynamos1"
+        images[agent] = [f"{repo}/{s}:{env.get(s.upper() + '_TAG') or tag}" for s in services]
+        images[agent].append(f"{sidecar_repo}/{sidecar}:{env.get(sidecar.upper() + '_TAG') or tag}")
+    return images
+
+
+def prepull_job_images(nodes, control, checkout):
+    """Pull the job images on every agent node in parallel.
+
+    Agents create job pods with imagePullPolicy Always and answer a training request with
+    HTTP 408 after 60 s, so the first request fails while a remote node is still downloading.
+    """
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    images = job_images(control, checkout)
+    if not images:
+        raise RuntimeError("No deployed agents found; install DYNAMOS first")
+
+    def pull(agent):
+        start = time.time()
+        command = " && ".join(f"sudo crictl pull {shlex.quote(image)} >/dev/null" for image in images[agent])
+        run(nodes[agent], command, quiet=True)
+        return time.time() - start
+
+    with ThreadPoolExecutor(max_workers=len(images)) as pool:
+        futures = {agent: pool.submit(pull, agent) for agent in images}
+    failures = []
+    for agent, future in futures.items():
+        try:
+            print(f"{agent:<12} {future.result():6.0f} s  {', '.join(images[agent])}")
+        except Exception as error:
+            failures.append(f"{agent}: {error}")
+    if failures:
+        raise RuntimeError("Image pre-pull failed:\n" + "\n\n".join(failures))
+
+
 def create_slice(fablib):
     """Build and submit the slice described in deployment_config.NODES."""
     slice_ = fablib.new_slice(name=SLICE_NAME)

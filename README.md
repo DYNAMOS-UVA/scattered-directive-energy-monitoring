@@ -24,11 +24,39 @@ git clone -b fabric-deployment --single-branch https://github.com/DYNAMOS-UVA/sc
 | `00_configure_fablib` | once per JupyterHub account | Sets the FABRIC project, validates/creates bastion and slice keys. |
 | `01_create_slice` | once | Creates the slice, configures inter-site routing, checks connectivity. |
 | `02_setup_cluster` | once | Base packages, Kubernetes (Kubespray + Flannel), Helm, Linkerd + Jaeger, Docker, k9s, experiment venv. |
-| `03_install_method` | each method switch | Resets the previous install, clones/updates the branch on `control`, runs its installer, waits for readiness, smoke test. |
+| `03_install_method` | each method switch | Resets the previous install, clones/updates the branch on `control`, runs its installer, waits for readiness, pre-pulls the job images on the agent nodes, smoke test. |
 | `04_run_experiment` | per experiment | Starts the runner in the background on `control`, shows status, downloads results to `results/`. |
 | `99_slice_management` | as needed | Lease renewal, SSH commands, network repair after reboot, slice deletion. |
 
 Run the cells in order; do not use *Run All*. Destructive cells are guarded by flags (`RESET_CLUSTER`, `STOP`, `CONFIRM_DELETE`).
+
+### Step by step
+
+**One-time setup**
+
+1. Push the branch so JupyterHub can clone it: `git push -u origin fabric-deployment`.
+2. In the FABRIC JupyterHub, clone only this branch (command above) and open the notebooks from that folder.
+3. If needed, edit [deployment_config.py](deployment_config.py): slice name, sites, VM sizes and pinned hosts.
+4. Run **00_configure_fablib** with your project ID. It sets up your FABRIC keys and config; needed once per JupyterHub account.
+5. Run **01_create_slice**. It creates the 9 VMs (about 10–20 min), connects the sites to each other and checks that `control` can reach every VM.
+6. Run **02_setup_cluster**. It installs Kubernetes and the shared tools, so the cluster is ready for any method (about 30–60 min).
+
+**For each method (`baseline`, `fed-bcd`, `semi-overlap-fed-bcd`, `fed-encrypt-dynamic`)**
+
+7. Open **03_install_method**, set `METHOD` at the top and run the cells. It removes the previous method and wipes its data, clones the branch onto `control`, installs that branch's DYNAMOS images, pre-pulls the training job images on the agent nodes (agents give up after 60 s if they still have to download them) and runs a short smoke test.
+8. Open **04_run_experiment**, set the same `METHOD` plus cycles/runs/extra arguments, and start the run. It keeps running on `control` even if you close Jupyter.
+9. Rerun the status cell to follow progress. When it shows **FINISHED**, run the download cell; results and the log go to `results/<method>-<timestamp>/`.
+10. Go back to step 7 for the next method. The slice and cluster are reused.
+
+**Maintenance and teardown**
+
+11. Use **99_slice_management** as needed:
+    - renew the lease before it expires
+    - get SSH commands
+    - repair networking after a VM reboot
+    - delete the slice when you're completely done (set `CONFIRM_DELETE = True`)
+
+The `.sh` scripts in `node_scripts/` are called by the notebooks; you don't run them yourself.
 
 ## Configuration
 

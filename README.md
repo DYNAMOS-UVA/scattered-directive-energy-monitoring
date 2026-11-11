@@ -97,3 +97,8 @@ Everything is in [deployment_config.py](deployment_config.py):
 - `UPDATE_CHECKOUT = True` hard-resets `~/sd-<branch>` to `origin/<branch>`, discarding changes made on `control`.
 - Renew the lease (`99_slice_management`) before it expires; an expired slice is deleted by FABRIC.
 - Useful on `control`: `k9s`, `kubectl get pods -A -o wide`, `helm list -A`.
+- Run k9s in an interactive SSH terminal on `control` as `ubuntu` (not with `sudo` or through a notebook execution helper).
+  To select the deployment's kubeconfig explicitly and show all namespaces, use `k9s --kubeconfig "$HOME/.kube/config" -A`.
+  If the view is empty, enter `:pods` or `:ns` and press Enter; press Escape to clear an active filter.
+  Compare with `kubectl --kubeconfig "$HOME/.kube/config" get pods -A --request-timeout=15s` to distinguish a
+  k9s view issue from a Kubernetes access problem.

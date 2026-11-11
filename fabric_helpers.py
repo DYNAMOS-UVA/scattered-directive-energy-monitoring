@@ -140,6 +140,66 @@ def prepull_job_images(nodes, control, checkout):
         raise RuntimeError("Image pre-pull failed:\n" + "\n\n".join(failures))
 
 
+def _try(getter):
+    try:
+        return getter()
+    except Exception:
+        return None
+
+
+def run_configuration(slice_, control, checkout, settings):
+    """Snapshot of what defines an experiment run: settings, code version, images and node placement."""
+    roles = {spec["name"]: spec["role"] for spec in NODES}
+    nodes = []
+    for node in sorted(slice_.get_nodes(), key=lambda n: n.get_name()):
+        name = node.get_name()
+        nodes.append({
+            "name": name,
+            "role": roles.get(name),
+            "site": _try(node.get_site),
+            "host": _try(node.get_host),
+            "cores": _try(node.get_cores),
+            "ram_gb": _try(node.get_ram),
+            "disk_gb": _try(node.get_disk),
+            "image": _try(node.get_image),
+            "data_ip": _try(lambda: data_ip(node)),
+        })
+
+    def remote(command):
+        return run(control, command, check=False, quiet=True).strip()
+
+    pods_jsonpath = '{range .items[*]}{.metadata.namespace} {.metadata.name} {.spec.nodeName}{"\\n"}{end}'
+    images_jsonpath = '{range .items[*]}{.spec.containers[*].image}{"\\n"}{end}'
+    return {
+        "settings": settings,
+        "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "slice": {"name": slice_.get_name(), "lease_end": str(_try(slice_.get_lease_end))},
+        "code": {
+            "checkout": checkout,
+            "branch": remote(f"git -C {checkout} rev-parse --abbrev-ref HEAD"),
+            "commit": remote(f"git -C {checkout} rev-parse HEAD"),
+            "uncommitted_changes": remote(f"git -C {checkout} status --porcelain").splitlines(),
+        },
+        "dynamos_images": sorted(set(remote(
+            f"kubectl get pods -A -o jsonpath={shlex.quote(images_jsonpath)} | tr ' ' '\\n' | grep dynamos1"
+        ).split())),
+        "job_images": _try(lambda: job_images(control, checkout)),
+        "pod_placement": [
+            dict(zip(("namespace", "pod", "node"), line.split()))
+            for line in remote(f"kubectl get pods -A -o jsonpath={shlex.quote(pods_jsonpath)}").splitlines()
+            if line.strip()
+        ],
+        "nodes": nodes,
+    }
+
+
+def save_run_configuration(control, remote_dir, configuration, file_name="run-configuration.json"):
+    import json
+
+    text = json.dumps(configuration, indent=2, default=str)
+    run(control, f"mkdir -p {remote_dir} && printf '%s\\n' {shlex.quote(text)} > {remote_dir}/{file_name}", quiet=True)
+
+
 def create_slice(fablib):
     """Build and submit the slice described in deployment_config.NODES."""
     slice_ = fablib.new_slice(name=SLICE_NAME)

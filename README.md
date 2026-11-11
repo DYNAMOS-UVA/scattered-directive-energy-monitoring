@@ -25,7 +25,7 @@ git clone -b fabric-deployment --single-branch https://github.com/DYNAMOS-UVA/sc
 | `01_create_slice` | once | Creates the slice, configures inter-site routing, checks connectivity. |
 | `02_setup_cluster` | once | Base packages, Kubernetes (Kubespray + Flannel), Helm, Linkerd + Jaeger, Docker, k9s, experiment venv. |
 | `03_install_method` | each method switch | Resets the previous install, clones/updates the branch on `control`, runs its installer, waits for readiness, pre-pulls the job images on the agent nodes, smoke test. |
-| `04_run_experiment` | per experiment | Starts the runner in the background on `control`, shows status, downloads results to `results/`. |
+| `04_run_experiment` | per experiment | Starts the runner in the background on `control`, shows status, lists the stored runs and downloads one as a zip to `results/`. |
 | `99_slice_management` | as needed | Lease renewal, SSH commands, network repair after reboot, slice deletion. |
 
 Run the cells in order; do not use *Run All*. Destructive cells are guarded by flags (`RESET_CLUSTER`, `STOP`, `CONFIRM_DELETE`).
@@ -45,7 +45,7 @@ Run the cells in order; do not use *Run All*. Destructive cells are guarded by f
 
 7. Open **03_install_method**, set `METHOD` at the top and run the cells. It removes the previous method and wipes its data, clones the branch onto `control`, installs that branch's DYNAMOS images, pre-pulls the training job images on the agent nodes (agents give up after 60 s if they still have to download them) and runs a short smoke test.
 8. Open **04_run_experiment**, set the same `METHOD` plus cycles/runs/extra arguments, and start the run. It keeps running on `control` even if you close Jupyter.
-9. Rerun the status cell to follow progress. When it shows **FINISHED**, run the download cell; results and the log go to `results/<method>-<timestamp>/`.
+9. Rerun the status cell to follow progress. When it shows **FINISHED**, the run is kept on `control` in `~/experiment-results/<method>-<timestamp>/` (also reachable over SSH). Run the download cell to copy it into JupyterHub as `results/<method>-<timestamp>.zip` and its extracted folder.
 10. Go back to step 7 for the next method. The slice and cluster are reused.
 
 **Maintenance and teardown**
@@ -85,8 +85,12 @@ Everything is in [deployment_config.py](deployment_config.py):
   hostPath data (`/mnt/rabbit-data`, `/mnt/etcd-data`, `/mnt/core-etcd-data-*`) on `dynamos`. Kubernetes, Linkerd and
   the checkouts are kept.
 - **Monitoring**: the Prometheus/Kepler stack is skipped (`INSTALL_MONITORING = False`); it is not needed for the VFL experiments.
-- **Experiments**: started with `nohup setsid` on `control`; logs go to `~/experiment-logs/`, results to
-  `~/experiment-results/<method>-<timestamp>/`. The download cell copies both to `results/` in JupyterHub.
+- **Experiments**: started with `nohup setsid` on `control`. Each run gets its own folder
+  `~/experiment-results/<method>-<timestamp>/` containing the runner's output, its log (`runner.log`) and
+  `run-configuration.json` (notebook settings and runner command, branch and commit of the checkout, DYNAMOS and
+  job images, node sites/hosts/sizes/IPs and pod placement). The folder survives DYNAMOS resets and reinstalls
+  (only deleting the slice removes it). The download cell zips a run and copies it to `results/` in JupyterHub.
+  Runs started before this layout keep their log in `~/experiment-logs/`; the download cell adds it to the zip.
 
 ## Notes
 

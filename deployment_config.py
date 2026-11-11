@@ -22,7 +22,7 @@ NODES = [
     {"name": "clientone",   "role": "agent",      "cores": 8, "ram": 16, "disk": 100, "site": "LOSA", "host": "losa-w2.fabric-testbed.net"},
     {"name": "clienttwo",   "role": "agent",      "cores": 8, "ram": 16, "disk": 100, "site": "HAWI", "host": "hawi-w3.fabric-testbed.net"},
     {"name": "clientthree", "role": "agent",      "cores": 8, "ram": 16, "disk": 100, "site": "AMST", "host": "amst-w3.fabric-testbed.net"},
-    {"name": "surf",        "role": "thirdparty", "cores": 8, "ram": 16, "disk": 100, "site": "TOKY", "host": "toky-w3.fabric-testbed.net"},
+    {"name": "surf",        "role": "thirdparty", "cores": 8, "ram": 16, "disk": 100, "site": "AMST", "host": "amst-w3.fabric-testbed.net"},
 ]
 
 CONTROL_NODE = "control"
@@ -41,7 +41,7 @@ DYNAMOS_DATA_DIRS = [
 REMOTE_TOOLS_DIR = "fabric-deployment"
 EXPERIMENT_VENV = "experiment-venv"
 RESULTS_DIR = "experiment-results"
-LOGS_DIR = "experiment-logs"
+LOGS_DIR = "experiment-logs"  # runner logs of older runs; new runs write runner.log inside their results folder
 INSTALLED_METHOD_FILE = f"{REMOTE_TOOLS_DIR}/installed_method"
 CURRENT_RUN_FILE = f"{REMOTE_TOOLS_DIR}/current_run"
 

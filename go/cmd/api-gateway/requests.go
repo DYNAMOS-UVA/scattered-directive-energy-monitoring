@@ -41,6 +41,8 @@ type TrainingRequestData struct {
 	Status   string
 	Results  []map[string]any
 	Metadata map[string]any
+	// Accuracies reported by the server during training, keyed by cycle.
+	accuracies map[string]float64
 	// add more fields as needed
 }
 
@@ -65,6 +67,9 @@ func addAndUpdateTrainingRequest(jobId string, cycle int64, clientsNumber int, t
 	}
 
 	reqData, _ := getTrainingRequest(jobId)
+	if accuracy, ok := reqData.accuracies[fmt.Sprint(cycle)]; ok {
+		result["accuracy"] = accuracy
+	}
 
 	if reqData.Results == nil {
 		reqData.Results = make([]map[string]any, 0)
@@ -73,6 +78,31 @@ func addAndUpdateTrainingRequest(jobId string, cycle int64, clientsNumber int, t
 	reqData.Results = append(reqData.Results, result)
 	trainingRequests.Store(jobId, reqData)
 
+}
+
+// recordIntermediateAccuracies publishes the accuracies the server returns with each
+// aggregation, so /getTrainingStatus shows them while training is still running.
+// The server only reports cycles whose local update has finished, so a cycle's
+// accuracy appears one sync round after the cycle itself.
+func recordIntermediateAccuracies(jobId string, accuracies map[string]float64) {
+	trainingStateMutex.Lock()
+	defer trainingStateMutex.Unlock()
+	reqData, ok := getTrainingRequest(jobId)
+	if !ok {
+		return
+	}
+	if reqData.accuracies == nil {
+		reqData.accuracies = make(map[string]float64, len(accuracies))
+	}
+	for cycle, accuracy := range accuracies {
+		reqData.accuracies[cycle] = accuracy
+	}
+	for _, res := range reqData.Results {
+		if accuracy, ok := reqData.accuracies[fmt.Sprintf("%v", res["train_round"])]; ok {
+			res["accuracy"] = accuracy
+		}
+	}
+	trainingRequests.Store(jobId, reqData)
 }
 
 func updateTrainingRequest(jobId string, accuracies map[string]float64) error {
@@ -476,6 +506,7 @@ func startVFLPipeline(p *vflPipeline, dataRequest map[string]any, clients *[]Cli
 				p.fail(data.cycle, phase.name, fmt.Errorf("decode accuracies: %w", err))
 				continue
 			}
+			recordIntermediateAccuracies(requestID, accuracies)
 
 			gradients := []string{}
 			for _, val := range gradientList {

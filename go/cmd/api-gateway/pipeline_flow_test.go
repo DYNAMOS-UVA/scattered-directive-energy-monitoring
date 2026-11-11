@@ -86,7 +86,13 @@ func installPipelineTransport(t *testing.T, failed string, overlap bool) {
 			if failed == "invalid_gradient" {
 				data["gradients"] = []int{1, 2, 3}
 			}
-			data["accuracies"] = `{"0":40,"1":50,"2":60}`
+			// The server only reports cycles whose local update finished before this aggregation.
+			reported := map[string]float64{}
+			for previous := range int(cycle) {
+				reported[fmt.Sprint(previous)] = float64(40 + 10*previous)
+			}
+			accuracies, _ := json.Marshal(reported)
+			data["accuracies"] = string(accuracies)
 			if failed == "invalid_accuracies" {
 				data["accuracies"] = "not-json"
 			}
@@ -205,10 +211,9 @@ func TestTrainingLifecycleMetricsAndFailureStatus(t *testing.T) {
 				t.Fatal("lifecycle timing lost completed calls/cycles")
 			}
 			if failure == "missing_accuracy" {
-				for _, result := range stored.Results {
-					if _, ok := result["accuracy"]; ok {
-						t.Fatal("partial final accuracy update published")
-					}
+				last := stored.Results[len(stored.Results)-1]
+				if _, ok := last["accuracy"]; ok {
+					t.Fatal("partial final accuracy update published")
 				}
 			}
 		})
@@ -240,6 +245,14 @@ func TestPipelineOverlapAndCycleMetrics(t *testing.T) {
 	}
 	if len(p.phases) != 12 {
 		t.Fatal("pipeline stages lost")
+	}
+	for index, want := range []float64{40, 50} {
+		if stored.Results[index]["accuracy"] != want {
+			t.Fatalf("cycle %d intermediate accuracy=%v, want %v", index, stored.Results[index]["accuracy"], want)
+		}
+	}
+	if _, ok := stored.Results[2]["accuracy"]; ok {
+		t.Fatal("last cycle accuracy published before the server reported it")
 	}
 	phase := startPhase("final_accuracy")
 	accuracies, err := getVFLAccuracies(phase, map[string]any{}, "server", "127.0.0.1")

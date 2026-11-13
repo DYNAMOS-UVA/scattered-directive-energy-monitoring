@@ -86,11 +86,14 @@ Everything is in [deployment_config.py](deployment_config.py):
   the checkouts are kept.
 - **Monitoring**: the Prometheus/Kepler stack is skipped (`INSTALL_MONITORING = False`); it is not needed for the VFL experiments.
 - **Experiments**: started with `nohup setsid` on `control`. Each run gets its own folder
-  `~/experiment-results/<method>-<timestamp>/` containing the runner's output, its log (`runner.log`) and
-  `run-configuration.json` (notebook settings and runner command, branch and commit of the checkout, DYNAMOS and
-  job images, node sites/hosts/sizes/IPs and pod placement). The folder survives DYNAMOS resets and reinstalls
-  (only deleting the slice removes it). The download cell zips a run and copies it to `results/` in JupyterHub.
-  Runs started before this layout keep their log in `~/experiment-logs/`; the download cell adds it to the zip.
+  `~/experiment-results/<method>-<timestamp>/` containing `runner.log` and the runner's experiment subfolder.
+  The subfolder contains `experiment.json`, the `run-*` folders and `run-configuration.json` (notebook settings and
+  runner command, branch and commit of the checkout, DYNAMOS and job images, node sites/hosts/sizes/IPs and pod
+  placement). The snapshot is staged in the outer folder before the runner starts and moved when the experiment
+  subfolder is created; if the runner exits before creating it, the snapshot remains in the outer folder.
+  The results survive DYNAMOS resets and reinstalls (only deleting the slice removes them). The download cell zips
+  a run and copies it to `results/` in JupyterHub. Runs started before this layout keep their log in
+  `~/experiment-logs/`; the download cell adds it to the zip.
 
 ## Notes
 
